@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
-
+#include <vector>
 Display* dsp;
 Window root_win;
 int screen;
@@ -31,6 +31,33 @@ void fail(const char* msg) {
 	XCloseDisplay(dsp);
 	exit(1);
 }
+
+struct task {
+	Window wid;
+	int pos;
+	char* title;
+};
+
+struct taskbar {
+	int global_allow_reorder;
+	int order_by;
+	std::vector<Window> ordered_wins;
+};
+
+void get_xprop(Window win_id) {
+	int format;
+	unsigned long nitems,after;
+	unsigned char* data = NULL;
+	Atom ret_type;
+	if (Success == XGetWindowProperty(dsp, win_id, n_atoms[nameAtom], 0, 65536,
+            false, n_atoms[utf8Atom], &ret_type, &format,
+			&nitems, &after, &data)) {
+		printf("%s\n",data);
+		XFree(data);
+	}
+
+}
+
 
 void get_window_title(Window win_id) {
 	int format;
