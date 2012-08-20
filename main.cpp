@@ -1,19 +1,19 @@
 /*
 	termtask - Terminal-based task bar
-    Copyright (C) 2012  Benjamin MdA
+	Copyright (C) 2012  Benjamin MdA
 
 	This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 
@@ -73,7 +73,7 @@ void get_xprop(Window win_id) {
 	unsigned char* data = NULL;
 	Atom ret_type;
 	if (Success == XGetWindowProperty(dsp, win_id, n_atoms[nameAtom], 0, 65536,
-            false, n_atoms[utf8Atom], &ret_type, &format,
+			false, n_atoms[utf8Atom], &ret_type, &format,
 			&nitems, &after, &data)) {
 		printf("%s\n",data);
 		XFree(data);
@@ -88,7 +88,7 @@ void get_window_title(Window win_id) {
 	unsigned char* data = NULL;
 	Atom ret_type;
 	if (Success == XGetWindowProperty(dsp, win_id, n_atoms[nameAtom], 0, 65536,
-            false, n_atoms[utf8Atom], &ret_type, &format,
+			false, n_atoms[utf8Atom], &ret_type, &format,
 			&nitems, &after, &data)) {
 		printf("%s |",data);
 		XFree(data);
@@ -107,15 +107,25 @@ int init_atoms() {
 	return 0;
 }
 
+/*
+	@i:gui-retrieve-client-titles
+		@i:gui-retrieve-clientlist
+*/
+
+
 int main(int argc, char* argv[]) {
+
+	//	@i:x11-open
 	dsp = XOpenDisplay(NULL);
+	//	@i:x11-get-screen
 	screen = DefaultScreen(dsp);
+	//	@i:x11-get-root-win
 	root_win = RootWindow(dsp,screen);
-	//printf("here\n");
 	init_atoms();
-	//printf("here1\n");
 	Atom ptype = XA_WINDOW;
 	Atom ret_type;
+	//	@i:x11-retrieve-clientlist-atom
+	//		-> n_atoms[client_atom]
 	n_atoms[clist_atom] = XInternAtom(dsp,"_NET_CLIENT_LIST",true);
 	if (n_atoms[clist_atom] == None){
 		ptype = XA_CARDINAL;
@@ -127,13 +137,23 @@ int main(int argc, char* argv[]) {
 	int fmt;
 	unsigned long num_items, bytes_left;
 	unsigned char *data = NULL;
-	
+	//	@i:gui-retrieve-clients
+	//	$impl-for:x11
+	//		@req:x11-atom-valid
+	//			-> n_atoms[client_atom]
+	//		@i:x11-retrieve-clientlist
 	if (Success == XGetWindowProperty(dsp,root_win,n_atoms[clist_atom],0,MAX_PROPERTY_VALUE_LEN/4,false,ptype,&ret_type,&fmt,&num_items,&bytes_left,&data)) {
 		Window* clone_ptr = (Window*)data;
+	//	@i:gui-retrieve-window-titles
 		for (int i = 0; i < num_items; i++) {
-			//Window cur_win = data[i*sizeof(Window)];
-			//printf("0x%08x\n", clone_ptr[i]);
+	//	@i:gui-retrieve-window-title
 			get_window_title(clone_ptr[i]);
+			/* desktop ID */
+			if ((desktop = (unsigned long *)get_property(disp, client_list[i],
+					XA_CARDINAL, "_NET_WM_DESKTOP", NULL)) == NULL) {
+				desktop = (unsigned long *)get_property(disp, client_list[i],
+						XA_CARDINAL, "_WIN_WORKSPACE", NULL);
+			}
 		}
 		XFree(data);
 	}
