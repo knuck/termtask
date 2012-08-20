@@ -1,3 +1,22 @@
+/*
+	termtask - Terminal-based task bar
+    Copyright (C) 2012  Benjamin MdA
+
+	This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <X11/Xlib.h>
@@ -37,11 +56,15 @@ struct task {
 	int pos;
 	char* title;
 };
-
-struct taskbar {
-	int global_allow_reorder;
+struct rt_settings {
 	int order_by;
-	std::vector<Window> ordered_wins;
+	int global_allow_reorder;
+	char* named_pipe;
+	char* fmt;
+};
+struct taskbar {
+	rt_settings settings;
+	std::vector<task> ordered_tasks;
 };
 
 void get_xprop(Window win_id) {
@@ -67,7 +90,7 @@ void get_window_title(Window win_id) {
 	if (Success == XGetWindowProperty(dsp, win_id, n_atoms[nameAtom], 0, 65536,
             false, n_atoms[utf8Atom], &ret_type, &format,
 			&nitems, &after, &data)) {
-		printf("%s\n",data);
+		printf("%s |",data);
 		XFree(data);
 	}
 
@@ -109,7 +132,7 @@ int main(int argc, char* argv[]) {
 		Window* clone_ptr = (Window*)data;
 		for (int i = 0; i < num_items; i++) {
 			//Window cur_win = data[i*sizeof(Window)];
-			printf("0x%08x\n", clone_ptr[i]);
+			//printf("0x%08x\n", clone_ptr[i]);
 			get_window_title(clone_ptr[i]);
 		}
 		XFree(data);
