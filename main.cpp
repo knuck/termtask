@@ -16,24 +16,30 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
+#include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <unistd.h>
 #include <vector>
 #include <string>
 #include <stdint.h>
+#include <sys/stat.h>
+#include <string.h>
 Display* dsp;
 Window root_win;
 int screen;
 Atom n_atoms[20];
+int npipe;
 const unsigned int clist_atom = 0;
 const unsigned int utf8Atom = 1;
 const unsigned int nameAtom = 2;
 const unsigned int vis_atom = 3;
 const unsigned int desk_atom = 4;
+const unsigned int deskname_atom = 5;
+const unsigned int curdesk_atom = 6;
 /*
 # termtask
 window list
@@ -78,6 +84,7 @@ struct rt_settings {
 	int global_allow_reorder;
 	char* named_pipe;
 	char* fmt;
+	int max_title_size;
 };
 struct taskbar {
 	rt_settings settings;
@@ -156,10 +163,12 @@ int init_atoms() {
 		}
 	}
 	n_atoms[desk_atom] = XInternAtom(dsp,"_NET_WM_DESKTOP",true);
+	n_atoms[deskname_atom] = XInternAtom(dsp,"_NET_DESKTOP_NAMES",true);
+	n_atoms[curdesk_atom] = XInternAtom(dsp,"_NET_CURRENT_DESKTOP",true);
 	return 0;
 }
 
-void add_event_request(Window wid, int mask=StructureNotifyMask) {
+void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask) {
 	XSelectInput(dsp,wid,mask);
 }
 
@@ -206,7 +215,9 @@ std::string fmt_string(task& t, std::string fmt) {
 			if ((*it) == '%') {
 				out_str += '%';
 			} else if ((*it) == 'n') {
-				out_str += t.title;
+				char buf[256];
+				sprintf(buf,"%.*s", tbar.settings.max_title_size,t.title.c_str());
+				out_str += buf;
 			} else if ((*it) == 'd') {
 				char buf[20];
 				sprintf(buf,"%ld", (signed long *)t.desktop);
@@ -239,13 +250,31 @@ end_fmt:
 	return out_str;
 }
 
-void print_task_fmt(std::string fmt="%n [%d]\n") {
-	//printf("-\n");
+int open_pipe() {
+	return open("/tmp/dzenesis",O_WRONLY|O_NONBLOCK);
+}
+
+void close_pipe(int pipe) {
+	close(npipe);
+}
+
+//^fg(#ffff00)^bg(black)|^bg()^fg()
+void print_task_fmt(std::string fmt="%n") {
+	printf("-\n");
+	npipe = open_pipe();
+	printf("openedpipe\n");
 	for (auto it = tbar.ordered_tasks.begin(); it != tbar.ordered_tasks.end(); it++) {
-		printf("%s", fmt_string(*it,fmt).c_str());
+		const char *res_str = fmt_string(*it,fmt).c_str();
+		printf("%s", res_str);
+		write(npipe,res_str,strlen(res_str));
 		//printf("%s [0x%02x]\n", (*it).title.c_str(),(*it).wid);
 	}
+	printf("\n");
 	fflush(stdout);
+	char newlinechar = '\n';
+	write(npipe, &newlinechar,1);
+	close_pipe(npipe);
+	
 }
 
 void print_taskbar_fmt(std::string fmt="%v %w") {
@@ -255,20 +284,37 @@ void print_taskbar_fmt(std::string fmt="%v %w") {
 int handle_error(Display* dsp, XErrorEvent* e) {
 	return 0;
 }
+
+
+
 int main(int argc, char* argv[]) {
+
 	dsp = XOpenDisplay(NULL);
 	screen = DefaultScreen(dsp);
 	root_win = RootWindow(dsp,screen);
+	tbar.settings.max_title_size = 22;
 	add_event_request(root_win,SubstructureNotifyMask);
 	init_atoms();
 	build_client_list_from_scratch();
 	print_task_fmt();
 	XSetErrorHandler(handle_error);
 	XEvent e;
+	
 	while (1) {
 		while (XPending (dsp)) {
 			XNextEvent(dsp, &e);
 			switch (e.type) {
+				case PropertyNotify: {
+					XPropertyEvent* de = (XPropertyEvent*)&e;
+					Window windex;
+					if ((windex = find_tbar_window(de->window)) != -1) {
+						//printf("Window %s destroyed\n", tbar.ordered_tasks[windex].title.c_str());
+						//tbar.ordered_tasks.erase(windex);
+						build_client_list_from_scratch();
+						print_task_fmt();
+					}
+					break;
+				}
 				case DestroyNotify: {
 					XDestroyWindowEvent* de = (XDestroyWindowEvent*)&e;
 					Window windex;
