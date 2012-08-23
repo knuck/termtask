@@ -251,7 +251,7 @@ end_fmt:
 }
 
 int open_pipe() {
-	return open("/tmp/dzenesis",O_WRONLY|O_NONBLOCK);
+	return open("/tmp/dzenesis",O_WRONLY);
 }
 
 void close_pipe(int pipe) {
@@ -259,21 +259,19 @@ void close_pipe(int pipe) {
 }
 
 //^fg(#ffff00)^bg(black)|^bg()^fg()
-void print_task_fmt(std::string fmt="%n") {
-	printf("-\n");
+void print_task_fmt(std::string fmt="%n\n") {
 	npipe = open_pipe();
-	printf("openedpipe\n");
+	std::string out_str;
 	for (auto it = tbar.ordered_tasks.begin(); it != tbar.ordered_tasks.end(); it++) {
-		const char *res_str = fmt_string(*it,fmt).c_str();
-		printf("%s", res_str);
-		write(npipe,res_str,strlen(res_str));
-		//printf("%s [0x%02x]\n", (*it).title.c_str(),(*it).wid);
+		out_str += fmt_string(*it,fmt);
 	}
-	printf("\n");
-	fflush(stdout);
-	char newlinechar = '\n';
-	write(npipe, &newlinechar,1);
+	out_str += "\4";
+	const char *res_str = out_str.c_str();
+	write(npipe,res_str,strlen(res_str));
 	close_pipe(npipe);
+	printf("%s\n", res_str);
+	//fflush(stdout);
+	
 	
 }
 
@@ -292,7 +290,7 @@ int main(int argc, char* argv[]) {
 	dsp = XOpenDisplay(NULL);
 	screen = DefaultScreen(dsp);
 	root_win = RootWindow(dsp,screen);
-	tbar.settings.max_title_size = 22;
+	tbar.settings.max_title_size = 255;
 	add_event_request(root_win,SubstructureNotifyMask);
 	init_atoms();
 	build_client_list_from_scratch();
@@ -305,6 +303,7 @@ int main(int argc, char* argv[]) {
 			XNextEvent(dsp, &e);
 			switch (e.type) {
 				case PropertyNotify: {
+					XSync(dsp,false);
 					XPropertyEvent* de = (XPropertyEvent*)&e;
 					Window windex;
 					if ((windex = find_tbar_window(de->window)) != -1) {
@@ -316,6 +315,7 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 				case DestroyNotify: {
+					XSync(dsp,false);
 					XDestroyWindowEvent* de = (XDestroyWindowEvent*)&e;
 					Window windex;
 					if ((windex = find_tbar_window(de->window)) != -1) {
@@ -327,6 +327,7 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 				case CreateNotify: {
+					XSync(dsp,false);
 					XCreateWindowEvent* ce = (XCreateWindowEvent*)&e;
 					//printf("\nSome window has been added\n");
 					//tbar.ordered_tasks.erase(windex);

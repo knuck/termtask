@@ -1,6 +1,6 @@
-echo faggot
-dcmd="./a.out"
+tail -f /tmp/dzenesis |
 while true
 do
-  ./a.out
-done | xargs echo
+  tr "\n" ":" |
+  cat
+done
