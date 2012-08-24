@@ -36,8 +36,8 @@ window order
 # termtray
 tray-icons
 
-# widgets
-move
+# move
+widgets
 
 #outputfmt
 "ẅ x f"
@@ -47,7 +47,10 @@ i = dec id
 d = desktop id
 o = order
 */
+
+/*		defines		*/
 #define MAX_PROPERTY_VALUE_LEN 4096
+#define ALL_DESKTOPS -1
 
 
 struct task {
@@ -82,11 +85,13 @@ struct taskbar {
 };
 
 /*		x11 stuff		*/
+
 Display* dsp;
 Window root_win;
 int screen;
 
 /*		x11 atoms		*/
+
 Atom n_atoms[20];
 const unsigned int clist_atom = 0;
 const unsigned int utf8Atom = 1;
@@ -99,25 +104,56 @@ const unsigned int pid_atom = 7;
 const unsigned int desknum_atom = 8;
 
 /*		linux stuff		*/
+
 int npipe;
 
 /*		runtime stuff		*/
+
 taskbar tbar;
 
 
+/*		prototypes		*/
+
+void fail(const char*);
+void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask);
+unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num=NULL);
+unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned long* out_num=NULL);
+unsigned long* get_desktop_for(Window win_id);
+char* get_window_title(Window win_id);
+Window* get_client_list(unsigned long* out_num);
+void update_desktop_names();
+void update_desktop_num();
+void update_current_desktop();
+void update_desktop_data();
+void build_client_list_from_scratch();
+void sort_by(OrderType ord);
+int find_tbar_window(Window wid, taskbar* taskbar=&tbar);
+void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsigned long nitems);
+int open_pipe();
+void close_pipe();
+std::string fmt_string(task& t, std::string fmt);
+void print_task_fmt(std::string fmt="%n\n");
+void print_taskbar_fmt(std::string fmt="%v %w");
+int init_atoms();
+int handle_error(Display* dsp, XErrorEvent* e);
+void init();
+void init_x_connection();
+void clean_up();
+/*		basic fallback		*/
+
 void fail(const char* msg) {
 	printf("%s\n", msg);
-	XCloseDisplay(dsp);
+	clean_up();
 	exit(1);
 }
 
 /*		x11 wrappers		*/
 
-void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask) {
+void add_event_request(Window wid, int mask) {
 	XSelectInput(dsp,wid,mask);
 }
 
-unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num=NULL) {
+unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num) {
 	int format;
 	unsigned long nitems,after;
 	unsigned char* data = NULL;
@@ -133,7 +169,7 @@ unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigne
 }
 
 
-unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned long* out_num=NULL) {
+unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned long* out_num) {
 	int format;
 	unsigned long nitems,after;
 	unsigned char* data = NULL;
@@ -149,6 +185,7 @@ unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned
 
 
 /*		get_xprop wrappers		*/
+
 unsigned long* get_desktop_for(Window win_id) {
 	unsigned long* retval = (unsigned long *)get_xprop(win_id,n_atoms[desk_atom],XA_CARDINAL);
 	return (unsigned long *)get_xprop(win_id,n_atoms[desk_atom],XA_CARDINAL);
@@ -163,6 +200,7 @@ Window* get_client_list(unsigned long* out_num) {
 }
 
 /*		virtual desktops		*/
+
 void update_desktop_names() {
 	unsigned long nitems;
 	char* desk_names = (char*)get_xprop(root_win,n_atoms[deskname_atom],n_atoms[utf8Atom],&nitems);
@@ -189,6 +227,7 @@ void update_desktop_data() {
 }
 
 /*		top-level windows		*/
+
 void build_client_list_from_scratch() {
 	tbar.ordered_tasks.clear();
 	unsigned long num_items;
@@ -200,7 +239,7 @@ void build_client_list_from_scratch() {
 			char* wtitle = get_window_title(win_ptr[i]);
 			if (wtitle != NULL) {
 				unsigned long* desk_id = get_desktop_for(win_ptr[i]);
-				signed long targ_desk = (signed long)desk_id==-1?-1:(signed long)*desk_id;
+				signed long targ_desk = (signed long)desk_id==ALL_DESKTOPS?ALL_DESKTOPS:(signed long)*desk_id;
 				tbar.ordered_tasks.push_back({win_ptr[i],i,std::string(wtitle),targ_desk});
 				XFree(desk_id);
 				//printf("Adding request for a window %s\n", wtitle);
@@ -215,9 +254,10 @@ void build_client_list_from_scratch() {
 }
 
 /*		helpers		*/
+
 void sort_by(OrderType ord) {
 	std::vector<task> newtask;
-	signed long cur_desk = -1;
+	signed long cur_desk = ALL_DESKTOPS;
 	while (tbar.ordered_tasks.size() != newtask.size()) {
 		for (auto it = tbar.ordered_tasks.begin(); it != tbar.ordered_tasks.end(); it++) {
 			if ((*it).desktop == cur_desk) {
@@ -229,7 +269,7 @@ void sort_by(OrderType ord) {
 	tbar.ordered_tasks = newtask;
 }
 
-int find_tbar_window(Window wid, taskbar* taskbar=&tbar) {
+int find_tbar_window(Window wid, taskbar* taskbar) {
 	int i = 0;
 	for (auto it = taskbar->ordered_tasks.begin(); it != taskbar->ordered_tasks.end(); it++) {
 		if ((*it).wid == wid) {
@@ -252,6 +292,7 @@ void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsign
 }
 
 /*		io/pipe handling		*/
+
 int open_pipe() {
 	return open("/tmp/dzenesis",O_WRONLY);
 }
@@ -261,6 +302,7 @@ void close_pipe(int pipe) {
 }
 
 /*		formatting		*/
+
 std::string fmt_string(task& t, std::string fmt) {
 	bool is_in_fmt = false;
 	std::string out_str;
@@ -304,7 +346,7 @@ end_fmt:
 	return out_str;
 }
 
-void print_task_fmt(std::string fmt="%n\n") {
+void print_task_fmt(std::string fmt) {
 	npipe = open_pipe();
 	std::string out_str;
 	for (auto it = tbar.ordered_tasks.begin(); it != tbar.ordered_tasks.end(); it++) {
@@ -317,15 +359,12 @@ void print_task_fmt(std::string fmt="%n\n") {
 	printf("%s\n", res_str);
 }
 
-void print_taskbar_fmt(std::string fmt="%v %w") {
+void print_taskbar_fmt(std::string fmt) {
 
-}
-
-int handle_error(Display* dsp, XErrorEvent* e) {
-	return 0;
 }
 
 /*		main stuff		*/
+
 int init_atoms() {
 	for (int i = 0; i < sizeof(n_atoms)/sizeof(Atom); i++) {
 		n_atoms[i] = None;
@@ -349,18 +388,34 @@ int init_atoms() {
 	return 0;
 }
 
-int main(int argc, char* argv[]) {
+int handle_error(Display* dsp, XErrorEvent* e) {
+	return 0;
+}
 
+void init_x_connection() {
 	dsp = XOpenDisplay(NULL);
 	screen = DefaultScreen(dsp);
 	root_win = RootWindow(dsp,screen);
-	tbar.settings.max_title_size = 255;
+	XSetErrorHandler(handle_error);
+}
+
+void init() {
 	add_event_request(root_win,SubstructureNotifyMask|PropertyChangeMask);
-	init_atoms();
 	update_desktop_data();
 	build_client_list_from_scratch();
+}
+
+void clean_up() {
+	XCloseDisplay(dsp);
+}
+
+int main(int argc, char* argv[]) {
+	init_x_connection();
+	init_atoms();
+	init();
+	// Parse settings here
+	tbar.settings.max_title_size = 255;
 	print_task_fmt();
-	XSetErrorHandler(handle_error);
 	XEvent e;
 	
 	while (1) {
@@ -399,6 +454,6 @@ int main(int argc, char* argv[]) {
 		usleep(1000);
 	}
 end:
-	XCloseDisplay(dsp);
+	clean_up();
 	return 0;
 }
