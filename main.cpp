@@ -25,32 +25,18 @@
 #include <unistd.h>
 #include <vector>
 #include <string>
-#include <stdint.h>
 #include <sys/stat.h>
 #include <string.h>
-Display* dsp;
-Window root_win;
-int screen;
-Atom n_atoms[20];
-int npipe;
-const unsigned int clist_atom = 0;
-const unsigned int utf8Atom = 1;
-const unsigned int nameAtom = 2;
-const unsigned int vis_atom = 3;
-const unsigned int desk_atom = 4;
-const unsigned int deskname_atom = 5;
-const unsigned int curdesk_atom = 6;
+
+
 /*
 # termtask
-window list
-desktop list
 window order
 
 # termtray
 tray-icons
 
 # widgets
-clock
 move
 
 #outputfmt
@@ -62,16 +48,14 @@ d = desktop id
 o = order
 */
 #define MAX_PROPERTY_VALUE_LEN 4096
-void fail(const char* msg) {
-	printf("%s\n", msg);
-	XCloseDisplay(dsp);
-	exit(1);
-}
+
 
 struct task {
 	Window wid;
 	int pos;
 	std::string title;
+	unsigned int pid;
+	std::string command;
 	signed long desktop;
 };
 enum OrderType {
@@ -86,11 +70,53 @@ struct rt_settings {
 	char* fmt;
 	int max_title_size;
 };
+struct root_win_data {
+	long num_desktops;
+	long current_desk;
+	std::vector<std::string> desk_names;
+};
 struct taskbar {
+	root_win_data root_data;
 	rt_settings settings;
 	std::vector<task> ordered_tasks;
 };
+
+/*		x11 stuff		*/
+Display* dsp;
+Window root_win;
+int screen;
+
+/*		x11 atoms		*/
+Atom n_atoms[20];
+const unsigned int clist_atom = 0;
+const unsigned int utf8Atom = 1;
+const unsigned int nameAtom = 2;
+const unsigned int vis_atom = 3;
+const unsigned int desk_atom = 4;
+const unsigned int deskname_atom = 5;
+const unsigned int curdesk_atom = 6;
+const unsigned int pid_atom = 7;
+const unsigned int desknum_atom = 8;
+
+/*		linux stuff		*/
+int npipe;
+
+/*		runtime stuff		*/
 taskbar tbar;
+
+
+void fail(const char* msg) {
+	printf("%s\n", msg);
+	XCloseDisplay(dsp);
+	exit(1);
+}
+
+/*		x11 wrappers		*/
+
+void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask) {
+	XSelectInput(dsp,wid,mask);
+}
+
 unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num=NULL) {
 	int format;
 	unsigned long nitems,after;
@@ -121,9 +147,10 @@ unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned
 	return NULL;
 }
 
+
+/*		get_xprop wrappers		*/
 unsigned long* get_desktop_for(Window win_id) {
 	unsigned long* retval = (unsigned long *)get_xprop(win_id,n_atoms[desk_atom],XA_CARDINAL);
-	//printf("%ld\n", *retval);
 	return (unsigned long *)get_xprop(win_id,n_atoms[desk_atom],XA_CARDINAL);
 }
 
@@ -133,45 +160,35 @@ char* get_window_title(Window win_id) {
 
 Window* get_client_list(unsigned long* out_num) {
 	return (Window*)get_xprop(root_win,n_atoms[clist_atom],XA_WINDOW,out_num);
-	//XGetWindowProperty(dsp,root_win,n_atoms[clist_atom],0,MAX_PROPERTY_VALUE_LEN/4,false,ptype,&ret_type,&fmt,&num_items,&bytes_left,&data)
-}
-void sort_by(OrderType ord) {
-	std::vector<task> newtask;
-	signed long cur_desk = -1;
-	while (tbar.ordered_tasks.size() != newtask.size()) {
-		for (auto it = tbar.ordered_tasks.begin(); it != tbar.ordered_tasks.end(); it++) {
-			if ((*it).desktop == cur_desk) {
-				newtask.push_back(*it);
-			}
-		}
-		cur_desk+=1;
-	}
-	tbar.ordered_tasks = newtask;
-}
-int init_atoms() {
-	for (int i = 0; i < sizeof(n_atoms)/sizeof(Atom); i++) {
-		n_atoms[i] = None;
-	}
-	n_atoms[vis_atom] = XInternAtom(dsp,"_NET_WM_VISIBLE_NAME",true);
-	n_atoms[nameAtom] = XInternAtom(dsp,"_NET_WM_NAME",true);
-	n_atoms[utf8Atom] = XInternAtom(dsp,"UTF8_STRING",true);
-	n_atoms[clist_atom] = XInternAtom(dsp,"_NET_CLIENT_LIST",true);
-	if (n_atoms[clist_atom] == None){
-		n_atoms[clist_atom] = XInternAtom(dsp,"_WIN_CLIENT_LIST",true);
-		if (n_atoms[clist_atom] == None){
-			fail("Could not retrieve window list");
-		}
-	}
-	n_atoms[desk_atom] = XInternAtom(dsp,"_NET_WM_DESKTOP",true);
-	n_atoms[deskname_atom] = XInternAtom(dsp,"_NET_DESKTOP_NAMES",true);
-	n_atoms[curdesk_atom] = XInternAtom(dsp,"_NET_CURRENT_DESKTOP",true);
-	return 0;
 }
 
-void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask) {
-	XSelectInput(dsp,wid,mask);
+/*		virtual desktops		*/
+void update_desktop_names() {
+	unsigned long nitems;
+	char* desk_names = (char*)get_xprop(root_win,n_atoms[deskname_atom],n_atoms[utf8Atom],&nitems);
+	//printf("%d\n", nitems);
+	int id = 0;
+    char_array_list_to_vector(desk_names,tbar.root_data.desk_names, nitems);
+    for (auto it = tbar.root_data.desk_names.begin(); it != tbar.root_data.desk_names.end(); it++) {
+    	printf("%s\n", (*it).c_str());;
+    }
 }
 
+void update_desktop_num() {
+	tbar.root_data.num_desktops = (long)get_xprop(root_win,n_atoms[desknum_atom],XA_CARDINAL,NULL);
+}
+
+void update_current_desktop() {
+	tbar.root_data.current_desk = (long)get_xprop(root_win,n_atoms[curdesk_atom],XA_CARDINAL,NULL);
+}
+
+void update_desktop_data() {
+	update_current_desktop();
+	update_desktop_num();
+	update_desktop_names();
+}
+
+/*		top-level windows		*/
 void build_client_list_from_scratch() {
 	tbar.ordered_tasks.clear();
 	unsigned long num_items;
@@ -196,6 +213,22 @@ void build_client_list_from_scratch() {
 		XFree(win_ptr);
 	}
 }
+
+/*		helpers		*/
+void sort_by(OrderType ord) {
+	std::vector<task> newtask;
+	signed long cur_desk = -1;
+	while (tbar.ordered_tasks.size() != newtask.size()) {
+		for (auto it = tbar.ordered_tasks.begin(); it != tbar.ordered_tasks.end(); it++) {
+			if ((*it).desktop == cur_desk) {
+				newtask.push_back(*it);
+			}
+		}
+		cur_desk+=1;
+	}
+	tbar.ordered_tasks = newtask;
+}
+
 int find_tbar_window(Window wid, taskbar* taskbar=&tbar) {
 	int i = 0;
 	for (auto it = taskbar->ordered_tasks.begin(); it != taskbar->ordered_tasks.end(); it++) {
@@ -207,6 +240,27 @@ int find_tbar_window(Window wid, taskbar* taskbar=&tbar) {
 	return -1;
 }
 
+void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsigned long nitems) {
+	out.clear();
+	std::string namebuf;
+    int i = 0;
+    while (i < nitems) {
+    	namebuf = list+i;
+    	out.push_back(namebuf);
+    	i += strlen(list+i)+1;
+    }
+}
+
+/*		io/pipe handling		*/
+int open_pipe() {
+	return open("/tmp/dzenesis",O_WRONLY);
+}
+
+void close_pipe(int pipe) {
+	close(npipe);
+}
+
+/*		formatting		*/
 std::string fmt_string(task& t, std::string fmt) {
 	bool is_in_fmt = false;
 	std::string out_str;
@@ -250,15 +304,6 @@ end_fmt:
 	return out_str;
 }
 
-int open_pipe() {
-	return open("/tmp/dzenesis",O_WRONLY);
-}
-
-void close_pipe(int pipe) {
-	close(npipe);
-}
-
-//^fg(#ffff00)^bg(black)|^bg()^fg()
 void print_task_fmt(std::string fmt="%n\n") {
 	npipe = open_pipe();
 	std::string out_str;
@@ -270,9 +315,6 @@ void print_task_fmt(std::string fmt="%n\n") {
 	write(npipe,res_str,strlen(res_str));
 	close_pipe(npipe);
 	printf("%s\n", res_str);
-	//fflush(stdout);
-	
-	
 }
 
 void print_taskbar_fmt(std::string fmt="%v %w") {
@@ -283,7 +325,29 @@ int handle_error(Display* dsp, XErrorEvent* e) {
 	return 0;
 }
 
-
+/*		main stuff		*/
+int init_atoms() {
+	for (int i = 0; i < sizeof(n_atoms)/sizeof(Atom); i++) {
+		n_atoms[i] = None;
+	}
+	n_atoms[vis_atom] = XInternAtom(dsp,"_NET_WM_VISIBLE_NAME",true);
+	n_atoms[nameAtom] = XInternAtom(dsp,"_NET_WM_NAME",true);
+	n_atoms[utf8Atom] = XInternAtom(dsp,"UTF8_STRING",true);
+	n_atoms[clist_atom] = XInternAtom(dsp,"_NET_CLIENT_LIST",true);
+	if (n_atoms[clist_atom] == None){
+		n_atoms[clist_atom] = XInternAtom(dsp,"_WIN_CLIENT_LIST",true);
+		if (n_atoms[clist_atom] == None){
+			fail("Could not retrieve window list");
+		}
+	}
+	n_atoms[desk_atom] = XInternAtom(dsp,"_NET_WM_DESKTOP",true);
+	n_atoms[deskname_atom] = XInternAtom(dsp,"_NET_DESKTOP_NAMES",true);
+	n_atoms[curdesk_atom] = XInternAtom(dsp,"_NET_CURRENT_DESKTOP",true);
+	n_atoms[pid_atom] = XInternAtom(dsp,"_NET_WM_PID",true);
+	n_atoms[desknum_atom] = XInternAtom(dsp,"_NET_NUMBER_OF_DESKTOPS",true);
+	
+	return 0;
+}
 
 int main(int argc, char* argv[]) {
 
@@ -291,8 +355,9 @@ int main(int argc, char* argv[]) {
 	screen = DefaultScreen(dsp);
 	root_win = RootWindow(dsp,screen);
 	tbar.settings.max_title_size = 255;
-	add_event_request(root_win,SubstructureNotifyMask);
+	add_event_request(root_win,SubstructureNotifyMask|PropertyChangeMask);
 	init_atoms();
+	update_desktop_data();
 	build_client_list_from_scratch();
 	print_task_fmt();
 	XSetErrorHandler(handle_error);
@@ -307,8 +372,6 @@ int main(int argc, char* argv[]) {
 					XPropertyEvent* de = (XPropertyEvent*)&e;
 					Window windex;
 					if ((windex = find_tbar_window(de->window)) != -1) {
-						//printf("Window %s destroyed\n", tbar.ordered_tasks[windex].title.c_str());
-						//tbar.ordered_tasks.erase(windex);
 						build_client_list_from_scratch();
 						print_task_fmt();
 					}
@@ -319,8 +382,6 @@ int main(int argc, char* argv[]) {
 					XDestroyWindowEvent* de = (XDestroyWindowEvent*)&e;
 					Window windex;
 					if ((windex = find_tbar_window(de->window)) != -1) {
-						//printf("Window %s destroyed\n", tbar.ordered_tasks[windex].title.c_str());
-						//tbar.ordered_tasks.erase(windex);
 						build_client_list_from_scratch();
 						print_task_fmt();
 					}
@@ -329,10 +390,7 @@ int main(int argc, char* argv[]) {
 				case CreateNotify: {
 					XSync(dsp,false);
 					XCreateWindowEvent* ce = (XCreateWindowEvent*)&e;
-					//printf("\nSome window has been added\n");
-					//tbar.ordered_tasks.erase(windex);
 					Window wid;
-					//XGetTransientForHint()
 					build_client_list_from_scratch();
 					print_task_fmt();
 				}
@@ -341,22 +399,6 @@ int main(int argc, char* argv[]) {
 		usleep(1000);
 	}
 end:
-	// Window* win_ptr = get_client_list(&num_items);
-	// if (win_ptr != NULL) {
-	// 	for (unsigned long i = 0; i < num_items; i++) {
-	// 		char* wtitle = get_window_title(win_ptr[i]);
-	// 		printf("%s\n", wtitle);
-	// 		XFree(wtitle);
-	// 		 desktop ID 
-	// 		if ((desktop = (unsigned long *)get_property(disp, client_list[i],
-	// 				XA_CARDINAL, "_NET_WM_DESKTOP", NULL)) == NULL) {
-	// 			desktop = (unsigned long *)get_property(disp, client_list[i],
-	// 					XA_CARDINAL, "_WIN_WORKSPACE", NULL);
-	// 		}
-			
-	// 	}
-	// 	XFree(win_ptr);
-	// }
 	XCloseDisplay(dsp);
 	return 0;
 }
