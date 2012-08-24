@@ -51,7 +51,7 @@ o = order
 /*		defines		*/
 #define MAX_PROPERTY_VALUE_LEN 4096
 #define ALL_DESKTOPS -1
-
+#define WINDOW_NOT_REGGED -1
 
 struct task {
 	Window wid;
@@ -111,8 +111,7 @@ int npipe;
 
 taskbar tbar;
 
-
-/*		prototypes		*/
+/*		function prototypes		*/
 
 void fail(const char*);
 void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask);
@@ -139,6 +138,7 @@ int handle_error(Display* dsp, XErrorEvent* e);
 void init();
 void init_x_connection();
 void clean_up();
+
 /*		basic fallback		*/
 
 void fail(const char* msg) {
@@ -149,11 +149,11 @@ void fail(const char* msg) {
 
 /*		x11 wrappers		*/
 
-void add_event_request(Window wid, int mask) {
+void add_event_request(Window wid, int mask /* StructureNotifyMask|PropertyChangeMask */) {
 	XSelectInput(dsp,wid,mask);
 }
 
-unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num) {
+unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num /* NULL */) {
 	int format;
 	unsigned long nitems,after;
 	unsigned char* data = NULL;
@@ -169,7 +169,7 @@ unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigne
 }
 
 
-unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned long* out_num) {
+unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned long* out_num /* NULL */) {
 	int format;
 	unsigned long nitems,after;
 	unsigned char* data = NULL;
@@ -269,7 +269,7 @@ void sort_by(OrderType ord) {
 	tbar.ordered_tasks = newtask;
 }
 
-int find_tbar_window(Window wid, taskbar* taskbar) {
+int find_tbar_window(Window wid, taskbar* taskbar /* &tbar */) {
 	int i = 0;
 	for (auto it = taskbar->ordered_tasks.begin(); it != taskbar->ordered_tasks.end(); it++) {
 		if ((*it).wid == wid) {
@@ -277,7 +277,7 @@ int find_tbar_window(Window wid, taskbar* taskbar) {
 		}
 		i+=1;
 	}
-	return -1;
+	return WINDOW_NOT_REGGED;
 }
 
 void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsigned long nitems) {
@@ -299,6 +299,23 @@ int open_pipe() {
 
 void close_pipe(int pipe) {
 	close(npipe);
+}
+
+void write_pipe_sector(int pipe, std::string secname, unsigned int length) {
+	const char* tmp_ptr = secname.c_str();
+	write(pipe,tmp_ptr,strlen(tmp_ptr)+1);
+	write(pipe,&length,4);
+}
+
+void write_pipe(int pipe, std::string sector, std::string& data) {
+	const char* tmp_ptr = data.c_str();
+	write_pipe_sector(pipe,sector,strlen(tmp_ptr));
+	write(pipe,tmp_ptr,strlen(tmp_ptr));
+}
+
+void write_pipe(int pipe, std::string sector, const char* data) {
+	write_pipe_sector(pipe,sector,strlen(data));
+	write(pipe,data,strlen(data));
 }
 
 /*		formatting		*/
@@ -331,7 +348,7 @@ std::string fmt_string(task& t, std::string fmt) {
 				out_str = *it;
 				sprintf(buf,"Unknown format character: %%%s\n",out_str.c_str());
 				fail(buf);
-				goto end_fmt;
+				break;
 			}
 			is_in_fmt = false;
 		} else {
@@ -346,7 +363,7 @@ end_fmt:
 	return out_str;
 }
 
-void print_task_fmt(std::string fmt) {
+void print_task_fmt(std::string fmt /* "%n\n" */) {
 	npipe = open_pipe();
 	std::string out_str;
 	for (auto it = tbar.ordered_tasks.begin(); it != tbar.ordered_tasks.end(); it++) {
@@ -354,12 +371,13 @@ void print_task_fmt(std::string fmt) {
 	}
 	out_str += "\4";
 	const char *res_str = out_str.c_str();
-	write(npipe,res_str,strlen(res_str));
+	//write(npipe,res_str,strlen(res_str));
+	write_pipe(npipe,"WINDOWS",res_str);
 	close_pipe(npipe);
 	printf("%s\n", res_str);
 }
 
-void print_taskbar_fmt(std::string fmt) {
+void print_taskbar_fmt(std::string fmt /* "%v %w" */) {
 
 }
 
@@ -425,8 +443,7 @@ int main(int argc, char* argv[]) {
 				case PropertyNotify: {
 					XSync(dsp,false);
 					XPropertyEvent* de = (XPropertyEvent*)&e;
-					Window windex;
-					if ((windex = find_tbar_window(de->window)) != -1) {
+					if (find_tbar_window(de->window) != WINDOW_NOT_REGGED) {
 						build_client_list_from_scratch();
 						print_task_fmt();
 					}
@@ -435,8 +452,7 @@ int main(int argc, char* argv[]) {
 				case DestroyNotify: {
 					XSync(dsp,false);
 					XDestroyWindowEvent* de = (XDestroyWindowEvent*)&e;
-					Window windex;
-					if ((windex = find_tbar_window(de->window)) != -1) {
+					if (find_tbar_window(de->window) != WINDOW_NOT_REGGED) {
 						build_client_list_from_scratch();
 						print_task_fmt();
 					}

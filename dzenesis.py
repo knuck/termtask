@@ -32,10 +32,15 @@ def print_list(somelist):
 f = open("/tmp/dzenesis",'r')
 #content = f.read()
 while True:
-	content = f.read().decode('UTF-8')
+	content = f.read()
 	if len(content) > 0:
 		#print content, len(content)
-		
+		print content[0:7]
+		if content[0:7] == "WINDOWS":
+			#print ord(content[12])
+			#sys.exit()
+			content = content[12:].decode('UTF-8')
+			#encodewrite(u"FOUND WINDOWS")
 		#splitted = str.split(content,'\4')
 		splitted=unicode.split(content,u'\4')
 		for transmission in splitted:
