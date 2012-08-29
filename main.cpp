@@ -25,8 +25,11 @@
 #include <unistd.h>
 #include <vector>
 #include <string>
-#include <sys/stat.h>
+#include <map>
 #include <string.h>
+#include <getopt.h>
+
+
 
 /*
 # termtask
@@ -46,6 +49,7 @@ widgets
 %d = desktop id
 %o = order
 %p = pid
+%D = num_workspaces
 $ = group by, eg:
 
 "%w %x" would output
@@ -82,7 +86,7 @@ $d = group by desktop
 $p = group by pid
 
 #options
--d --deaf, don't ignore commands from input pipe
+-d --deaf, ignore commands from input pipe
 -i --interactive, ncurses interactive mode
 -p --handle-pipes, treat input and output files as named pipes, handle creation and removal
 -I --input <filename>, filename to read from for commands
@@ -91,7 +95,7 @@ $p = group by pid
 -w --workspace-string= "FORMATSTRING". string formatting for desktops
 -g --foreground don't run as daemon
 -v --verbose <LEVEL> output information. default is 0 (output nothing)
-	1 = output the same info from pipe to stdout
+	1 = output the same info from pipe to stderr
 	2 = output debugging information
 	this option only has effect if used with -g
 -s --stdout output to stdout
@@ -101,6 +105,7 @@ $p = group by pid
 */
 
 /*		defines		*/
+
 #define MAX_PROPERTY_VALUE_LEN 4096
 #define ALL_DESKTOPS -1
 #define WINDOW_NOT_REGGED -1
@@ -118,25 +123,44 @@ enum OrderType {
 	BY_DESKTOP,
 	BY_ALPHA
 };
+
 struct rt_settings {
 	OrderType order_by;
 	int global_allow_reorder;
-	char* named_pipe;
-	char* fmt;
-	std::string sector_fmt;
-	std::string desk_fmt;
 	int max_title_size;
+	// opts
+	bool deaf,interactive,force_pipes,stdout;
+	char in_file[256],out_file[256];
+	int verbose_level;
+};
+
+struct workspace {
+	std::string title;
+	int pos;
 };
 struct root_win_data {
 	long num_desktops;
 	long current_desk;
-	std::vector<std::string> desk_names;
+	std::vector<workspace> workspaces;
 };
 struct taskbar {
 	root_win_data root_data;
 	rt_settings settings;
 	std::vector<task> ordered_tasks;
 };
+
+typedef std::string(*format_func) (std::string fmt, void* data);
+
+struct str_func_wrapper {
+	format_func fmt_func;
+	std::string arg_fmt;
+	void* arg_data;
+	std::string operator()() {
+		return fmt_func(arg_fmt,arg_data);
+	}
+};
+
+
 
 /*		x11 stuff		*/
 
@@ -164,6 +188,7 @@ int npipe;
 /*		runtime stuff		*/
 
 taskbar tbar;
+std::map<std::string,str_func_wrapper> sector_list;
 
 /*		function prototypes		*/
 
@@ -186,11 +211,16 @@ int get_pid(Window wid);
 std::string get_cmd_line(int pid);
 int open_pipe();
 void close_pipe();
-std::string fmt_string(task& t, std::string fmt);
-void print_task_fmt(std::string fmt="%n\n");
-void print_taskbar_fmt(std::string fmt="%v %w");
+std::string format_task_string(std::string fmt, task& t);
+
+std::string build_tasks_string(std::string fmt, void* ptr);
+std::string build_sector_string(std::string sector, std::string fmt, str_func_wrapper& format_content);
+void print_taskbar_fmt();
+std::string build_workspace_string(std::string fmt, void* ptr);
+
 int init_atoms();
 int handle_error(Display* dsp, XErrorEvent* e);
+void init_rt_struct();
 void init();
 void init_x_connection();
 void clean_up();
@@ -261,10 +291,14 @@ void update_desktop_names() {
 	unsigned long nitems;
 	char* desk_names = (char*)get_xprop(root_win,n_atoms[deskname_atom],n_atoms[utf8Atom],&nitems);
 	//printf("%d\n", nitems);
-	int id = 0;
-    char_array_list_to_vector(desk_names,tbar.root_data.desk_names, nitems);
-    for (auto it = tbar.root_data.desk_names.begin(); it != tbar.root_data.desk_names.end(); it++) {
-    	printf("%s\n", (*it).c_str());;
+	std::vector<std::string> converted_vec;
+    char_array_list_to_vector(desk_names,converted_vec, nitems);
+    int i = 0;
+    while (converted_vec.size() > 0) {
+    	tbar.root_data.workspaces.push_back({converted_vec.at(0),i});
+    	converted_vec.erase(converted_vec.begin());
+    	//printf("%s\n", (*it).c_str());;
+    	i++;
     }
 }
 
@@ -455,40 +489,14 @@ end_fmt:
 	return out_str;
 }
 
-
 std::string build_tasks_string(std::string fmt, void* ptr) {
 	std::string out_str;
-	taskbar* tbar = (taskbar*)ptr;
-	for (auto it = tbar->ordered_tasks.begin(); it != tbar->ordered_tasks.end(); it++) {
+	std::vector<task>* tasks = (std::vector<task>*)ptr;
+	for (auto it = tasks->begin(); it != tasks->end(); it++) {
 		out_str += format_task_string(fmt,*it);
 	}
 	return out_str;
 }
-
-void print_task_fmt(std::string fmt /* "%n\n" */) {
-	npipe = open_pipe();
-		std::string out_str = build_tasks_string(fmt,&tbar);
-		out_str += "\4";
-		const char *res_str = out_str.c_str();
-		//write(npipe,res_str,strlen(res_str));
-		write_pipe(npipe,"WINDOWS",res_str);
-	close_pipe(npipe);
-	printf("%s\n", res_str);
-}
-
-
-typedef std::string(*format_func) (std::string fmt, void* data);
-
-struct str_func_wrapper {
-	std::string arg_fmt;
-	
-	format_func fmt_func;
-	void* arg_data;
-	std::string operator()() {
-		return fmt_func(arg_fmt,arg_data);
-	}
-	
-};
 
 std::string build_sector_string(std::string sector, std::string fmt, str_func_wrapper& format_content) {
 	bool is_in_fmt = false;
@@ -521,12 +529,52 @@ end_fmt:
 	return out_str;
 }
 
-void print_taskbar_fmt(std::string fmt /* "%v %w" */) {
+void print_taskbar_fmt() {
+	for (auto it = sector_list.begin(); it != sector_list.end(); it++) {
+		printf("%s\n", build_sector_string(it->first, "\4%s: %c", it->second).c_str());
+	}
+}
 
+std::string format_workspace_string(std::string fmt, workspace& wp) {
+	std::string out_str;
+	bool is_in_fmt = false;
+	for (auto it = fmt.begin(); it != fmt.end(); it++) {
+		if (is_in_fmt) {
+			if ((*it) == '%') {
+				out_str += '%';
+			} else if ((*it) == 't') {
+				out_str += wp.title;
+			} else if ((*it) == 'd') {
+				char buf[20];
+				sprintf(buf,"%ld", (signed long *)wp.pos);
+				out_str += buf;
+			} else {
+				char buf[256];
+				out_str = *it;
+				sprintf(buf,"Unknown format character: %%%s\n",out_str.c_str());
+				fail(buf);
+				break;
+			}
+			is_in_fmt = false;
+		} else {
+			if ((*it) == '%') {
+				is_in_fmt = true;
+			} else {
+				out_str += *it;
+			}
+		}
+	}
+end_fmt:
+	return out_str;
 }
 
 std::string build_workspace_string(std::string fmt, void* ptr) {
-	return "";
+	std::string out_str;
+	std::vector<workspace>* workspaces = (std::vector<workspace>*)ptr;
+	for (auto it = workspaces->begin(); it != workspaces->end(); it++) {
+		out_str += format_workspace_string(fmt,*it);
+	}
+	return out_str;
 }
 
 /*		main stuff		*/
@@ -565,27 +613,104 @@ void init_x_connection() {
 	XSetErrorHandler(handle_error);
 }
 
+void init_rt_struct() {
+	tbar.settings.max_title_size = 255;
+	sector_list["WINDOWS"] = {build_tasks_string,"%n\n",&tbar.ordered_tasks};
+	sector_list["DESKTOPS"] = {build_workspace_string,"%t\n",&tbar.root_data.workspaces};
+	tbar.settings.deaf = false;
+	tbar.settings.interactive = false;
+	tbar.settings.force_pipes = false;
+	tbar.settings.stdout = false;
+	strcpy(tbar.settings.in_file,"/tmp/termtask/in");
+	strcpy(tbar.settings.out_file,"/tmp/termtask/out");
+	tbar.settings.verbose_level = 0;
+}
+
 void init() {
+	init_rt_struct();
 	add_event_request(root_win,SubstructureNotifyMask|PropertyChangeMask);
 	update_desktop_data();
 	build_client_list_from_scratch();
+	//printf("%s\n",build_workspace_string("%t %d\n", &tbar.root_data.workspaces).c_str());
 }
 
 void clean_up() {
 	XCloseDisplay(dsp);
 }
 
+void parse_args(int argc, char* argv[]) {
+	static option long_options[] = {
+		{"config-file",required_argument,NULL,'c'},
+		{"deaf",no_argument,NULL,'d'},
+		{"interactive",no_argument,NULL,'i'},
+		{"pipes",no_argument,NULL,'p'},
+		{"input-file",required_argument,NULL,'I'},
+		{"output-file",required_argument,NULL,'O'},
+		{"format-string",required_argument,NULL,'f'},
+		{"foreground",required_argument,NULL,'F'},
+		{"workspace-string",required_argument,NULL,'w'},
+		{"verbose",optional_argument,NULL,'v'},
+		{"stdout",no_argument,NULL,'s'},
+		{"sector-string",required_argument,NULL,'S'},
+		{"help",no_argument,NULL,'h'},
+		{0,0,0}
+	};
+	int c;
+	int option_index;
+	while ((c = getopt_long(argc, argv, "dipshFS:I:O:f:w:c:v::",long_options,&option_index)) != -1) {
+		printf ("option %d\n", option_index);
+		switch (c) {
+			case 'd': {
+				tbar.settings.deaf = true;
+				break;
+			}
+			case 'i': {
+				tbar.settings.interactive = true;
+				break;
+			}
+			case 'p': {
+				tbar.settings.force_pipes = true;
+				break;
+			}
+			case 'I': {
+				strcpy(tbar.settings.in_file,optarg);
+				break;
+			}
+			case 'O': {
+				strcpy(tbar.settings.out_file,optarg);
+				break;
+			}
+			case 'f': {
+				//tbar.settings.interactive = true;
+				break;
+			}
+			case 'w': {
+				//tbar.settings.interactive = true;
+				break;
+			}
+			case 'v': {
+				if (optarg) {
+					tbar.settings.verbose_level = atoi(optarg);
+				} else {
+					tbar.settings.verbose_level = 2;
+				}
+				break;
+			}
+		}
+	}
+	exit(EXIT_SUCCESS);
+}
+
 int main(int argc, char* argv[]) {
+	
 	init_x_connection();
 	init_atoms();
 	init();
-	// Parse settings here
-	tbar.settings.max_title_size = 255;
-	print_task_fmt();
+	parse_args(argc,argv);
+	
+	print_taskbar_fmt();
 	XEvent e;
-	str_func_wrapper window_fmt_wrapper = {tbar.settings.fmt,build_tasks_string,&tbar.ordered_tasks};
-	str_func_wrapper desk_fmt_wrapper = {tbar.settings.fmt,build_workspace_string,&tbar.root_data};
-	//auto sector_formatter = std::bind(build_sector_string,tbar.rt_settings.sector_fmt,(void*));
+	
 	while (1) {
 		while (XPending (dsp)) {
 			XNextEvent(dsp, &e);
@@ -595,7 +720,7 @@ int main(int argc, char* argv[]) {
 					XPropertyEvent* de = (XPropertyEvent*)&e;
 					if (find_tbar_window(de->window) != WINDOW_NOT_REGGED) {
 						build_client_list_from_scratch();
-						print_task_fmt();
+						print_taskbar_fmt();
 					} else if (de->window == root_win) {
 
 					}
@@ -606,7 +731,7 @@ int main(int argc, char* argv[]) {
 					XDestroyWindowEvent* de = (XDestroyWindowEvent*)&e;
 					if (find_tbar_window(de->window) != WINDOW_NOT_REGGED) {
 						build_client_list_from_scratch();
-						print_task_fmt();
+						print_taskbar_fmt();
 					}
 					break;
 				}
@@ -615,7 +740,7 @@ int main(int argc, char* argv[]) {
 					XCreateWindowEvent* ce = (XCreateWindowEvent*)&e;
 					Window wid;
 					build_client_list_from_scratch();
-					print_task_fmt();
+					print_taskbar_fmt();
 				}
 			}
 		}
