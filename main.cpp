@@ -28,7 +28,6 @@
 #include <sys/stat.h>
 #include <string.h>
 
-
 /*
 # termtask
 window order
@@ -41,11 +40,64 @@ widgets
 
 #outputfmt
 "ẅ x f"
-w = window name
-x = hex id
-i = dec id
-d = desktop id
-o = order
+%w = window name
+%x = hex id
+%i = dec id
+%d = desktop id
+%o = order
+%p = pid
+$ = group by, eg:
+
+"%w %x" would output
+WINDOWS:
+<window-name> <window-id>
+
+"$w%w %x" would output
+WINDOWS:
+TITLE:<window-name> WID:<window-id>
+
+With a proper sector formatting and group by, you can achieve basic sgml output:
+Sector formatting: "<%s>%c</%s>"
+Output formatting: "$w%w %p"
+<WINDOWS>
+<WINDOW>
+<TITLE>Some window</TITLE>
+<PID>23789</PID>
+</WINDOW>
+</WINDOWS>
+
+Even more so with desktop formatting such as "%t"
+<DESKTOP>
+<TITLE>Desktop title</TITLE>
+<WINDOWS>
+<WINDOW>
+<TITLE>Some window</TITLE>
+<PID>23789</PID>
+</WINDOW>
+</WINDOWS>
+</DESKTOP>
+
+$w = group by window
+$d = group by desktop
+$p = group by pid
+
+#options
+-d --deaf, don't ignore commands from input pipe
+-i --interactive, ncurses interactive mode
+-p --handle-pipes, treat input and output files as named pipes, handle creation and removal
+-I --input <filename>, filename to read from for commands
+-O --output <filename>, filename to write status to
+-f --format-string= "FORMATSTRING". string formatting for tasks
+-w --workspace-string= "FORMATSTRING". string formatting for desktops
+-g --foreground don't run as daemon
+-v --verbose <LEVEL> output information. default is 0 (output nothing)
+	1 = output the same info from pipe to stdout
+	2 = output debugging information
+	this option only has effect if used with -g
+-s --stdout output to stdout
+-S --sector-string= "FORMATSTRING", string formatting for sector separators
+-h --help, display this help
+
 */
 
 /*		defines		*/
@@ -71,6 +123,8 @@ struct rt_settings {
 	int global_allow_reorder;
 	char* named_pipe;
 	char* fmt;
+	std::string sector_fmt;
+	std::string desk_fmt;
 	int max_title_size;
 };
 struct root_win_data {
@@ -128,6 +182,8 @@ void build_client_list_from_scratch();
 void sort_by(OrderType ord);
 int find_tbar_window(Window wid, taskbar* taskbar=&tbar);
 void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsigned long nitems);
+int get_pid(Window wid);
+std::string get_cmd_line(int pid);
 int open_pipe();
 void close_pipe();
 std::string fmt_string(task& t, std::string fmt);
@@ -240,7 +296,13 @@ void build_client_list_from_scratch() {
 			if (wtitle != NULL) {
 				unsigned long* desk_id = get_desktop_for(win_ptr[i]);
 				signed long targ_desk = (signed long)desk_id==ALL_DESKTOPS?ALL_DESKTOPS:(signed long)*desk_id;
-				tbar.ordered_tasks.push_back({win_ptr[i],i,std::string(wtitle),targ_desk});
+				task t;
+					t.wid = win_ptr[i];
+					t.title = wtitle;
+					t.pid = get_pid(t.wid);
+					t.command = get_cmd_line(t.pid);
+					t.desktop = targ_desk;
+				tbar.ordered_tasks.push_back(t);
 				XFree(desk_id);
 				//printf("Adding request for a window %s\n", wtitle);
 				add_event_request(win_ptr[i]);
@@ -291,6 +353,36 @@ void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsign
     }
 }
 
+/*		pid and command-line		*/
+
+int get_pid(Window wid) {
+	int pid = 0;
+	unsigned char *r = get_xprop(wid,n_atoms[pid_atom],XA_CARDINAL);
+	if (r != 0) {
+		pid = (r[1]*256)+r[0];
+		XFree(r);
+	}
+	return pid;
+}
+
+std::string get_cmd_line(int pid) {
+	char buf[10];
+	sprintf(buf,"%d",pid);
+	std::string targ_file = std::string("/proc/")+buf+std::string("/cmdline");
+	std::string retval;
+	FILE *f = fopen(targ_file.c_str(),"rb");
+	if (f) {
+		char cur_c;
+		while (!feof(f)) {
+			fread(&cur_c,sizeof(char),1,f);
+			retval+= cur_c;
+		}
+		fclose(f);
+	}
+	//printf("%s\n", retval.c_str());
+	return retval;
+}
+
 /*		io/pipe handling		*/
 
 int open_pipe() {
@@ -320,7 +412,7 @@ void write_pipe(int pipe, std::string sector, const char* data) {
 
 /*		formatting		*/
 
-std::string fmt_string(task& t, std::string fmt) {
+std::string format_task_string(std::string fmt, task& t) {
 	bool is_in_fmt = false;
 	std::string out_str;
 	for (auto it = fmt.begin(); it != fmt.end(); it++) {
@@ -363,22 +455,78 @@ end_fmt:
 	return out_str;
 }
 
+
+std::string build_tasks_string(std::string fmt, void* ptr) {
+	std::string out_str;
+	taskbar* tbar = (taskbar*)ptr;
+	for (auto it = tbar->ordered_tasks.begin(); it != tbar->ordered_tasks.end(); it++) {
+		out_str += format_task_string(fmt,*it);
+	}
+	return out_str;
+}
+
 void print_task_fmt(std::string fmt /* "%n\n" */) {
 	npipe = open_pipe();
-	std::string out_str;
-	for (auto it = tbar.ordered_tasks.begin(); it != tbar.ordered_tasks.end(); it++) {
-		out_str += fmt_string(*it,fmt);
-	}
-	out_str += "\4";
-	const char *res_str = out_str.c_str();
-	//write(npipe,res_str,strlen(res_str));
-	write_pipe(npipe,"WINDOWS",res_str);
+		std::string out_str = build_tasks_string(fmt,&tbar);
+		out_str += "\4";
+		const char *res_str = out_str.c_str();
+		//write(npipe,res_str,strlen(res_str));
+		write_pipe(npipe,"WINDOWS",res_str);
 	close_pipe(npipe);
 	printf("%s\n", res_str);
 }
 
+
+typedef std::string(*format_func) (std::string fmt, void* data);
+
+struct str_func_wrapper {
+	std::string arg_fmt;
+	
+	format_func fmt_func;
+	void* arg_data;
+	std::string operator()() {
+		return fmt_func(arg_fmt,arg_data);
+	}
+	
+};
+
+std::string build_sector_string(std::string sector, std::string fmt, str_func_wrapper& format_content) {
+	bool is_in_fmt = false;
+	std::string out_str;
+	for (auto it = fmt.begin(); it != fmt.end(); it++) {
+		if (is_in_fmt) {
+			if ((*it) == '%') {
+				out_str += '%';
+			} else if ((*it) == 's') {
+				out_str += sector;
+			} else if ((*it) == 'c') {
+				out_str += format_content();
+			} else {
+				char buf[256];
+				out_str = *it;
+				sprintf(buf,"Unknown format character: %%%s\n",out_str.c_str());
+				fail(buf);
+				break;
+			}
+			is_in_fmt = false;
+		} else {
+			if ((*it) == '%') {
+				is_in_fmt = true;
+			} else {
+				out_str += *it;
+			}
+		}
+	}
+end_fmt:
+	return out_str;
+}
+
 void print_taskbar_fmt(std::string fmt /* "%v %w" */) {
 
+}
+
+std::string build_workspace_string(std::string fmt, void* ptr) {
+	return "";
 }
 
 /*		main stuff		*/
@@ -435,7 +583,9 @@ int main(int argc, char* argv[]) {
 	tbar.settings.max_title_size = 255;
 	print_task_fmt();
 	XEvent e;
-	
+	str_func_wrapper window_fmt_wrapper = {tbar.settings.fmt,build_tasks_string,&tbar.ordered_tasks};
+	str_func_wrapper desk_fmt_wrapper = {tbar.settings.fmt,build_workspace_string,&tbar.root_data};
+	//auto sector_formatter = std::bind(build_sector_string,tbar.rt_settings.sector_fmt,(void*));
 	while (1) {
 		while (XPending (dsp)) {
 			XNextEvent(dsp, &e);
@@ -446,6 +596,8 @@ int main(int argc, char* argv[]) {
 					if (find_tbar_window(de->window) != WINDOW_NOT_REGGED) {
 						build_client_list_from_scratch();
 						print_task_fmt();
+					} else if (de->window == root_win) {
+
 					}
 					break;
 				}
