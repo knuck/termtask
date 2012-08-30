@@ -35,9 +35,6 @@
 # termtask
 window order
 
-# termtray
-tray-icons
-
 # move
 widgets
 
@@ -85,24 +82,50 @@ $w = group by window
 $d = group by desktop
 $p = group by pid
 
-#options
--d --deaf, ignore commands from input pipe
--i --interactive, ncurses interactive mode
--p --handle-pipes, treat input and output files as named pipes, handle creation and removal
--I --input <filename>, filename to read from for commands
--O --output <filename>, filename to write status to
--f --format-string= "FORMATSTRING". string formatting for tasks
--w --workspace-string= "FORMATSTRING". string formatting for desktops
--g --foreground don't run as daemon
--v --verbose <LEVEL> output information. default is 0 (output nothing)
-	1 = output the same info from pipe to stderr
-	2 = output debugging information
-	this option only has effect if used with -g
--s --stdout output to stdout
--S --sector-string= "FORMATSTRING", string formatting for sector separators
--h --help, display this help
-
 */
+
+/*		help 		*/
+
+#define VERSION "0.1"
+#define HELP "termtask " VERSION "\n" \
+"Usage: termtask [options]...\n" \
+"\n" \
+"General options\n" \
+"  -d, --deaf               Ignore commands from input file.\n" \
+"  -g, --foreground         Run in foreground. Without this option, termtask will\n" \
+"                           daemonize on startup. If -i is set, this is ignored.\n" \
+"  -i, --interactive        Start ncurses interactive mode.\n" \
+"  -s, --stdout             Output to stdout instead of using a file. Cannot be\n" \
+"                           used with -i.\n" \
+"\n" \
+"I/O control\n" \
+"  -p, --handle-pipes       Treat input and output files as named pipes, handling\n" \
+"                           creation and deletion.\n" \
+"  -I, --input=<FILE>       Path to read commands from. The default is\n" \
+"                           /tmp/termtask/in. If used with -d, it has no effect.\n" \
+"  -O, --output=<FILE>      Path to write output to. The default is\n" \
+"                           /tmp/termtask/out. If used with -s, it has no effect.\n" \
+"\n" \
+"Formatting\n" \
+"  -f, --format=<STRING>    Format string for window output. For more information,\n" \
+"                           refer to the manual. Defaults to \"%w\\n\"\n" \
+"  -w, --workspace=<STRING> Format string for desktop output. For more information,\n" \
+"                           refer to the manual. Defaults to \"%t\\n\"\n" \
+"  -S, --sector=<STRING>    Format string for sector output. For more information,\n" \
+"                           refer to the manual. Defaults to \"%s\\n\"\n" \
+"\n" \
+"Debugging\n" \
+"  -v, --verbose [LEVEL]    Set debug information output level: \n" \
+"                             0: Output nothing.\n" \
+"                             1: Output debugging information to stderr [default].\n" \
+"                             2: Output debugging information and the processed.\n" \
+"                                output to stderr.\n" \
+"                           The LEVEL value is optional, and if left in blank,\n" \
+"                           it'll be set to 2.\n" \
+"\n" \
+"Misc\n" \
+"  -h, --help               Show this help. \n" \
+
 
 /*		defines		*/
 
@@ -446,6 +469,27 @@ void write_pipe(int pipe, std::string sector, const char* data) {
 
 /*		formatting		*/
 
+bool eval_format_string(std::string targ_str, std::string allowed_fmt, std::string formatters) {
+	bool is_in_fmt = false;
+	char current_format = '\0';
+	for (auto it = targ_str.begin(); it != targ_str.end(); it++) {
+		if (is_in_fmt) {
+			if (current_format == *it || allowed_fmt.find(*it) != std::string::npos) {
+				current_format = '\0';
+			} else {
+				return false;
+			}
+			is_in_fmt = false;
+		} else {
+			if (formatters.find(*it) != std::string::npos) {
+				is_in_fmt = true;
+				current_format = *it;
+			}
+		}
+	}
+	return true;
+}
+
 std::string format_task_string(std::string fmt, task& t) {
 	bool is_in_fmt = false;
 	std::string out_str;
@@ -627,6 +671,13 @@ void init_rt_struct() {
 }
 
 void init() {
+	// int retval = 99;
+	// retval = eval_format_string("$d%w %p", "wdp", "%$");
+	// retval = eval_format_string("$d%w %p", "wdp", "%");
+	// retval = eval_format_string("$d%w %p", "wdp", "$");
+	// retval = eval_format_string("$d%w %p", "wd", "%$");
+	// retval = eval_format_string("$d%w %%", "wd", "%$");
+	// retval = eval_format_string("$d%w %$", "wd", "%$");
 	init_rt_struct();
 	add_event_request(root_win,SubstructureNotifyMask|PropertyChangeMask);
 	update_desktop_data();
@@ -681,11 +732,11 @@ void parse_args(int argc, char* argv[]) {
 				break;
 			}
 			case 'f': {
-				//tbar.settings.interactive = true;
+				if (eval_format_string(optarg,"wxidopD","%$") == false) fail("Invalid format string.");
 				break;
 			}
 			case 'w': {
-				//tbar.settings.interactive = true;
+				if (eval_format_string(optarg,"tic","%") == false) fail("Invalid format string.");
 				break;
 			}
 			case 'v': {
@@ -694,6 +745,10 @@ void parse_args(int argc, char* argv[]) {
 				} else {
 					tbar.settings.verbose_level = 2;
 				}
+				break;
+			}
+			case 'h': {
+				printf("%s\n", HELP);
 				break;
 			}
 		}
