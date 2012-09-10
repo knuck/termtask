@@ -91,6 +91,7 @@ $p = group by pid
 "Usage: termtask [options]...\n" \
 "\n" \
 "General options\n" \
+"  -c, --config=<FILE>      Read configuration from FILE, ignoring other arguments.\n" \
 "  -d, --deaf               Ignore commands from input file.\n" \
 "  -g, --foreground         Run in foreground. Without this option, termtask will\n" \
 "                           daemonize on startup. If -i is set, this is ignored.\n" \
@@ -112,7 +113,7 @@ $p = group by pid
 "  -w, --workspace=<STRING> Format string for desktop output. For more information,\n" \
 "                           refer to the manual. Defaults to \"%t\\n\"\n" \
 "  -S, --sector=<STRING>    Format string for sector output. For more information,\n" \
-"                           refer to the manual. Defaults to \"%s\\n\"\n" \
+"                           refer to the manual. Defaults to \"%s\\n%c\\4\"\n" \
 "\n" \
 "Debugging\n" \
 "  -v, --verbose [LEVEL]    Set debug information output level: \n" \
@@ -125,6 +126,12 @@ $p = group by pid
 "\n" \
 "Misc\n" \
 "  -h, --help               Show this help. \n" \
+"\n" \
+"\n" \
+"Author, current maintainer: Benjamin MdA <knuckvice@gmail.com>\n"\
+"Website: https://github.com/knuck/termtask\n"\
+"Released under the GNU General Public License.\n"\
+"Copyright (C) 2012"
 
 
 /*		defines		*/
@@ -149,11 +156,11 @@ enum OrderType {
 
 struct rt_settings {
 	OrderType order_by;
-	int global_allow_reorder;
 	int max_title_size;
 	// opts
 	bool deaf,interactive,force_pipes,stdout;
 	char in_file[256],out_file[256];
+	std::string sector_fmt;
 	int verbose_level;
 };
 
@@ -442,6 +449,20 @@ std::string get_cmd_line(int pid) {
 
 /*		io/pipe handling		*/
 
+bool create_pipe(char* path) {
+	if (mkfifo(path,0666) != 0) {
+		if (errno == EEXIST) return false;
+	}
+	return true;
+}
+
+bool delete_pipe(char* path) {
+	if (unlink(path) != 0) {
+		return false;
+	}
+	return true;
+}
+
 int open_pipe() {
 	return open("/tmp/dzenesis",O_WRONLY);
 }
@@ -575,7 +596,7 @@ end_fmt:
 
 void print_taskbar_fmt() {
 	for (auto it = sector_list.begin(); it != sector_list.end(); it++) {
-		printf("%s\n", build_sector_string(it->first, "\4%s: %c", it->second).c_str());
+		printf("%s\n", build_sector_string(it->first, tbar.settings.sector_fmt, it->second).c_str());
 	}
 }
 
@@ -653,20 +674,29 @@ int handle_error(Display* dsp, XErrorEvent* e) {
 void init_x_connection() {
 	dsp = XOpenDisplay(NULL);
 	screen = DefaultScreen(dsp);
-	root_win = RootWindow(dsp,screen);
+	root_win = RootWindow(dsp, screen);
 	XSetErrorHandler(handle_error);
+}
+
+void set_in_file(char* path) {
+	strcpy(tbar.settings.in_file, path);
+}
+
+void set_out_file(char* path) {
+	strcpy(tbar.settings.out_file, path);
 }
 
 void init_rt_struct() {
 	tbar.settings.max_title_size = 255;
-	sector_list["WINDOWS"] = {build_tasks_string,"%n\n",&tbar.ordered_tasks};
-	sector_list["DESKTOPS"] = {build_workspace_string,"%t\n",&tbar.root_data.workspaces};
+	sector_list["WINDOWS"] = {build_tasks_string, "%n\n", &tbar.ordered_tasks};
+	sector_list["DESKTOPS"] = {build_workspace_string, "%t\n", &tbar.root_data.workspaces};
 	tbar.settings.deaf = false;
 	tbar.settings.interactive = false;
 	tbar.settings.force_pipes = false;
 	tbar.settings.stdout = false;
-	strcpy(tbar.settings.in_file,"/tmp/termtask/in");
-	strcpy(tbar.settings.out_file,"/tmp/termtask/out");
+	set_in_file("/tmp/termtask/in");
+	set_out_file("/tmp/termtask/out");
+	tbar.settings.sector_fmt = "\4%s: %c";
 	tbar.settings.verbose_level = 0;
 }
 
@@ -691,18 +721,18 @@ void clean_up() {
 
 void parse_args(int argc, char* argv[]) {
 	static option long_options[] = {
-		{"config-file",required_argument,NULL,'c'},
+		{"config",required_argument,NULL,'c'},
 		{"deaf",no_argument,NULL,'d'},
 		{"interactive",no_argument,NULL,'i'},
 		{"pipes",no_argument,NULL,'p'},
-		{"input-file",required_argument,NULL,'I'},
-		{"output-file",required_argument,NULL,'O'},
-		{"format-string",required_argument,NULL,'f'},
+		{"input",required_argument,NULL,'I'},
+		{"output",required_argument,NULL,'O'},
+		{"format",required_argument,NULL,'f'},
 		{"foreground",required_argument,NULL,'F'},
-		{"workspace-string",required_argument,NULL,'w'},
+		{"workspace",required_argument,NULL,'w'},
 		{"verbose",optional_argument,NULL,'v'},
 		{"stdout",no_argument,NULL,'s'},
-		{"sector-string",required_argument,NULL,'S'},
+		{"sector",required_argument,NULL,'S'},
 		{"help",no_argument,NULL,'h'},
 		{0,0,0}
 	};
@@ -723,20 +753,32 @@ void parse_args(int argc, char* argv[]) {
 				tbar.settings.force_pipes = true;
 				break;
 			}
+			case 's': {
+				tbar.settings.stdout = true;
+				break;
+			}
 			case 'I': {
-				strcpy(tbar.settings.in_file,optarg);
+				set_in_file(optarg);
 				break;
 			}
 			case 'O': {
-				strcpy(tbar.settings.out_file,optarg);
+				set_out_file(optarg);
 				break;
 			}
 			case 'f': {
 				if (eval_format_string(optarg,"wxidopD","%$") == false) fail("Invalid format string.");
+				sector_list["WINDOWS"] = {build_tasks_string, optarg, &tbar.ordered_tasks};
+				
 				break;
 			}
 			case 'w': {
-				if (eval_format_string(optarg,"tic","%") == false) fail("Invalid format string.");
+				if (eval_format_string(optarg,"tic","%") == false) fail("Invalid workspace format string.");
+				sector_list["DESKTOPS"] = {build_workspace_string, optarg, &tbar.root_data.workspaces};
+				break;
+			}
+			case 'S': {
+				if (eval_format_string(optarg,"sc","%") == false) fail("Invalid sector format string.");
+				tbar.settings.sector_fmt = optarg;
 				break;
 			}
 			case 'v': {
@@ -762,7 +804,10 @@ int main(int argc, char* argv[]) {
 	init_atoms();
 	init();
 	parse_args(argc,argv);
-	
+	if (tbar.settings.pipes == true) {
+		if (!create_pipe(tbar.settings.in_file)) fprintf(stderr, "Could not create pipe at %s\n", tbar.settings.in_file);
+		if (!create_pipe(tbar.settings.out_file)) fprintf(stderr, "Could not create pipe at %s\n", tbar.settings.out_file);
+	}
 	print_taskbar_fmt();
 	XEvent e;
 	
