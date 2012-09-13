@@ -171,31 +171,20 @@ struct rt_settings {
 
 struct workspace {
 	std::string title;
-	int pos;
+	long pos;
 };
+
 struct root_win_data {
 	long num_desktops;
 	long current_desk;
-	std::vector<workspace> workspaces;
 };
+
 struct taskbar {
 	root_win_data root_data;
 	rt_settings settings;
 	std::vector<task> ordered_tasks;
+	std::vector<workspace> workspaces;
 };
-
-typedef std::string(*format_func) (std::string fmt, void* data);
-
-struct str_func_wrapper {
-	format_func fmt_func;
-	std::string arg_fmt;
-	void* arg_data;
-	std::string operator()() {
-		return fmt_func(arg_fmt,arg_data);
-	}
-};
-
-
 
 /*		x11 stuff		*/
 
@@ -216,14 +205,11 @@ const unsigned int curdesk_atom = 6;
 const unsigned int pid_atom = 7;
 const unsigned int desknum_atom = 8;
 
-/*		linux stuff		*/
-
-int npipe;
-
 /*		runtime stuff		*/
 
 taskbar tbar;
-std::map<std::string,str_func_wrapper> sector_list;
+std::map<std::string,std::string> sector_list;
+typedef std::pair<const std::string,std::string> sector_type;
 
 /*		function prototypes		*/
 
@@ -245,12 +231,8 @@ int get_pid(Window wid);
 std::string get_cmd_line(int pid);
 int open_pipe();
 void close_pipe();
-std::string format_task_string(std::string fmt, task& t);
 
-std::string build_tasks_string(std::string fmt, void* ptr);
-std::string build_sector_string(std::string sector, std::string fmt, str_func_wrapper& format_content);
 void print_taskbar_fmt();
-std::string build_workspace_string(std::string fmt, void* ptr);
 
 int init_atoms();
 int handle_error(Display* dsp, XErrorEvent* e);
@@ -258,6 +240,15 @@ void init_rt_struct();
 void init();
 void init_x_connection();
 void clean_up();
+
+void set_in_file(char* path);
+
+void set_out_file(char* path);
+
+void set_in_file(const char* path);
+
+void set_out_file(const char* path);
+bool delete_pipe(char* path);
 
 /*		basic fallback		*/
 
@@ -274,6 +265,19 @@ void sig_exit(int param) {
 	exit(0);
 }
 
+int handle_error(Display* dsp, XErrorEvent* e) {
+	return 0;
+}
+
+/*		clean up		*/
+
+void clean_up() {
+	XCloseDisplay(dsp);
+	if (tbar.settings.force_pipes) {
+		delete_pipe(tbar.settings.in_file);
+		delete_pipe(tbar.settings.out_file);
+	}
+}
 
 /*		x11 wrappers		*/
 
@@ -311,7 +315,6 @@ unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned
 	return NULL;
 }
 
-
 /*		get_xprop wrappers		*/
 
 unsigned long* get_desktop_for(Window win_id) {
@@ -336,18 +339,22 @@ void update_desktop_names() {
     char_array_list_to_vector(desk_names,converted_vec, nitems);
     int i = 0;
     while (converted_vec.size() > 0) {
-    	tbar.root_data.workspaces.push_back({converted_vec.at(0),i});
+    	tbar.workspaces.push_back({converted_vec.at(0),i});
     	converted_vec.erase(converted_vec.begin());
     	i++;
     }
 }
 
 void update_desktop_num() {
-	tbar.root_data.num_desktops = (long)get_xprop(root_win,n_atoms[desknum_atom],XA_CARDINAL,NULL);
+	unsigned char* ptr = get_xprop(root_win,n_atoms[desknum_atom],XA_CARDINAL,NULL);
+	tbar.root_data.num_desktops = (int)*ptr;
+	XFree(ptr);
 }
 
 void update_current_desktop() {
-	tbar.root_data.current_desk = (long)get_xprop(root_win,n_atoms[curdesk_atom],XA_CARDINAL,NULL);
+	unsigned char* ptr = get_xprop(root_win,n_atoms[curdesk_atom],XA_CARDINAL,NULL);
+	tbar.root_data.current_desk = (int)*ptr;
+	XFree(ptr);
 }
 
 void update_desktop_data() {
@@ -378,12 +385,10 @@ void build_client_list_from_scratch() {
 					t.desktop = targ_desk;
 				tbar.ordered_tasks.push_back(t);
 				XFree(desk_id);
-				//printf("Adding request for a window %s\n", wtitle);
 				add_event_request(win_ptr[i]);
 				XFree(wtitle);
 			}
 		}
-		//printf("Got all clients\n");
 		XFree(win_ptr);
 	}
 }
@@ -423,7 +428,6 @@ int get_pid(Window wid) {
 	}
 	return pid;
 }
-
 
 #define PROC std::string("/proc/")
 #define CMDLINE std::string("/cmdline")
@@ -467,7 +471,7 @@ void write_raw_sector(FILE* file, std::string secname, unsigned int length) {
 
 /*		formatting		*/
 
-template <typename T> bool generic_format_string(std::string targ_str, std::map<std::string, std::function<std::string(T&)>> allowed_fmt) {
+template <typename T> bool eval_format_string(std::string targ_str, std::map<std::string, std::function<std::string(T&)>> allowed_fmt) {
 	bool is_in_fmt = false;
 	std::string current_format = "";
 	for (auto it = targ_str.begin(); it != targ_str.end(); it++) {
@@ -475,12 +479,11 @@ template <typename T> bool generic_format_string(std::string targ_str, std::map<
 			if (current_format[0] == *it) {
 				current_format += "";
 			} else {
-				printf("searching for %s\n", (current_format+(*it)).c_str());
+				//printf("searching for %s\n", (current_format+(*it)).c_str());
 				if (allowed_fmt.find(current_format+(*it)) != allowed_fmt.end()) {
 					current_format = "";
-					//allowed_fmt[current_format+(*it)]()
 				} else {
-					printf("failed\n");
+				//	printf("failed\n");
 					return false;
 				}
 			}
@@ -497,173 +500,152 @@ template <typename T> bool generic_format_string(std::string targ_str, std::map<
 	return true;
 }
 
-bool eval_format_string(std::string targ_str, std::string allowed_fmt, std::string formatters) {
+std::string generic_format_string(std::string targ_str, std::map<std::string, std::function<std::string()>>& format_types) {
 	bool is_in_fmt = false;
-	char current_format = '\0';
+	std::string current_format = "";
+	std::string out_str;
 	for (auto it = targ_str.begin(); it != targ_str.end(); it++) {
 		if (is_in_fmt) {
-			if (current_format == *it || allowed_fmt.find(*it) != std::string::npos) {
-				current_format = '\0';
+			if (current_format[0] == *it) {
+				current_format = "";
+				out_str+=*it;
 			} else {
-				return false;
+				out_str += format_types[current_format+(*it)]();
+				current_format = "";
 			}
 			is_in_fmt = false;
 		} else {
-			if (formatters.find(*it) != std::string::npos) {
+			if (format_types.end()!=find_if(format_types.begin(),format_types.end(),[it] (std::pair<const std::string, std::function<std::string()>>& sit) -> bool {
+				return sit.first[0] == *it;
+			})) {
 				is_in_fmt = true;
-				current_format = *it;
+				current_format += *it;
+			} else {
+				out_str += *it;
 			}
 		}
 	}
-	return true;
+	return out_str;
 }
+
+template <typename T> std::string generic_format_string(std::string targ_str, std::map<std::string, std::function<std::string(T&)>>& format_types, T& data) {
+	bool is_in_fmt = false;
+	std::string current_format = "";
+	std::string out_str;
+	for (auto it = targ_str.begin(); it != targ_str.end(); it++) {
+		if (is_in_fmt) {
+			if (current_format[0] == *it) {
+				current_format = "";
+				out_str+=*it;
+			} else {
+				out_str += format_types[current_format+(*it)](data);
+				current_format = "";
+			}
+			is_in_fmt = false;
+		} else {
+			if (format_types.end()!=find_if(format_types.begin(),format_types.end(),[it] (std::pair<const std::string, std::function<std::string(T&)>>& sit) -> bool {
+				return sit.first[0] == *it;
+			})) {
+				is_in_fmt = true;
+				current_format += *it;
+			} else {
+				out_str += *it;
+			}
+		}
+	}
+	return out_str;
+}
+
+template <typename T> std::string generic_build_string(std::string targ_str, std::map<std::string, std::function<std::string(T&)>>& format_types, std::vector<T>& data) {
+	std::string out_str;
+	for (auto it = data.begin(); it != data.end(); it++) {
+		out_str += generic_format_string(targ_str,format_types,*it);
+	}
+	return out_str;
+}
+
+/*		lambdas for formatting		*/
+
+/*		window formatting		*/
+
 std::map<std::string,std::function<std::string(task&)>> win_fmts = {
-	{"%w",[](task &t) {
+	{"%w",[](task &t) -> std::string {
 						char buf[256];
 						sprintf(buf,"%.*s",tbar.settings.max_title_size,t.title.c_str());
-						return std::string(buf);
+						return buf;
 					   }
 	},
-	{"%d",[](task &t) {
+	{"%d",[](task &t) -> std::string {
 						char buf[20];
 						sprintf(buf,"%ld",(signed long *)t.desktop);
-						return std::string(buf);
+						return buf;
 					   }
 	},
-	{"%x",[](task &t) {
+	{"%x",[](task &t) -> std::string {
 						char buf[256];
 						sprintf(buf,"0x02%x", t.wid);
-						return std::string(buf);
+						return buf;
 					   }
 	},
-	{"%X",[](task &t) {
+	{"%X",[](task &t) -> std::string {
 						char buf[256];
 						sprintf(buf,"0x02%X", t.wid);
-						return std::string(buf);
+						return buf;
 	}}
 };
 
+/*		workspace formatting		*/
+
 std::map<std::string,std::function<std::string(workspace&)>> work_fmts = {
-	{"%t",[](workspace &wp) {
+	{"%t",[](workspace &wp) -> std::string {
 						return wp.title;
 					   }
 	},
-	{"%d",[](workspace &wp) {
+	{"%d",[](workspace &wp) -> std::string {
 						char buf[20];
 						sprintf(buf,"%ld", (signed long *)wp.pos);
 						return buf;
 	}}
 };
 
-std::map<std::string,std::function<std::string(task&)>> gen_fmts = {
-	{"%w",[&](task &t) {
-						char buf[256];
-						sprintf(buf,"%.*s",tbar.settings.max_title_size,t.title.c_str());
-						return std::string(buf);
-					   }
-	},
-	{"%d",[](task &t) {
+/*		general formatting		*/
+
+std::map<std::string,std::function<std::string()>> gen_fmts = {
+	{"%D",[]() -> std::string {
 						char buf[20];
-						sprintf(buf,"%ld",(signed long *)t.desktop);
-						return std::string(buf);
+						sprintf(buf,"%ld",tbar.root_data.num_desktops);
+						return buf;
 					   }
 	},
-	{"%x",[](task &t) {
-						char buf[256];
-						sprintf(buf,"0x02%x", t.wid);
-						return std::string(buf);
+	{"%n",[]() -> std::string {
+						char buf[20];
+						sprintf(buf,"%d",tbar.ordered_tasks.size());
+						return buf;
 					   }
 	},
-	{"%X",[](task &t) {
-						char buf[256];
-						sprintf(buf,"0x02%X", t.wid);
-						return std::string(buf);
+	{"%c",[]() -> std::string {
+						char buf[20];
+						sprintf(buf,"%ld",tbar.root_data.current_desk);
+						return buf;
 	}}
 };
-										
 
-std::string format_task_string(std::string fmt, task& t) {
-	bool is_in_fmt = false;
-	std::string out_str;
-	for (auto it = fmt.begin(); it != fmt.end(); it++) {
-		if (is_in_fmt) {
-			if ((*it) == '%') {
-				out_str += '%';
-			} else if ((*it) == 'n') {
-				char buf[256];
-				sprintf(buf,"%.*s", tbar.settings.max_title_size,t.title.c_str());
-				out_str += buf;
-			} else if ((*it) == 'd') {
-				char buf[20];
-				sprintf(buf,"%ld", (signed long *)t.desktop);
-				out_str += buf;
-			} else if ((*it) == 'x') {
-				char buf[20];
-				sprintf(buf,"0x02%x", t.wid);
-				out_str += buf;
-			} else if ((*it) == 'X') {
-				char buf[20];
-				sprintf(buf,"0x02%X", t.wid);
-				out_str += buf;
-			} else {
-				char buf[256];
-				out_str = *it;
-				sprintf(buf,"Unknown format character: %%%s\n",out_str.c_str());
-				fail(buf);
-				break;
-			}
-			is_in_fmt = false;
+/*		sector formatting		*/
+
+std::map<std::string,std::function<std::string(sector_type&)>> sec_fmts = {
+	{"%s",[](sector_type& sec) -> std::string {
+		return sec.first;
+	}},
+	{"%c",[](sector_type& sec) -> std::string {
+		if (sec.first == "WINDOWS") {
+			return generic_build_string(sec.second, win_fmts,tbar.ordered_tasks);
+		} else if (sec.first == "DESKTOPS") {
+			return generic_build_string(sec.second, work_fmts,tbar.workspaces);
 		} else {
-			if ((*it) == '%') {
-				is_in_fmt = true;
-			} else {
-				out_str += *it;
-			}
+			return generic_format_string(sec.second, gen_fmts);
 		}
-	}
-end_fmt:
-	return out_str;
-}
-
-std::string build_tasks_string(std::string fmt, void* ptr) {
-	std::string out_str;
-	std::vector<task>* tasks = (std::vector<task>*)ptr;
-	for (auto it = tasks->begin(); it != tasks->end(); it++) {
-		out_str += format_task_string(fmt,*it);
-	}
-	return out_str;
-}
-
-std::string build_sector_string(std::string sector, std::string fmt, str_func_wrapper& format_content) {
-	bool is_in_fmt = false;
-	std::string out_str;
-	for (auto it = fmt.begin(); it != fmt.end(); it++) {
-		if (is_in_fmt) {
-			if ((*it) == '%') {
-				out_str += '%';
-			} else if ((*it) == 's') {
-				out_str += sector;
-			} else if ((*it) == 'c') {
-				out_str += format_content();
-			} else {
-				char buf[256];
-				out_str = *it;
-				sprintf(buf,"Unknown format character: %%%s\n",out_str.c_str());
-				fail(buf);
-				break;
-			}
-			is_in_fmt = false;
-		} else {
-			if ((*it) == '%') {
-				is_in_fmt = true;
-			} else {
-				out_str += *it;
-			}
-		}
-	}
-end_fmt:
-	return out_str;
-}
+	}}
+};
 
 void print_sector_list() {
 	std::string seclist;
@@ -672,7 +654,6 @@ void print_sector_list() {
 	for (auto it = sector_list.begin(); it != sector_list.end(); it++) {
 		total_size+=sprintf(buf,"%s\n", it->first.c_str());
 		seclist += buf;
-		//seclist += "\4\0";
 	}
 
 	FILE *f = fopen(tbar.settings.out_file,"w");
@@ -687,76 +668,17 @@ void print_sector_list() {
 void print_taskbar_fmt() {
 	FILE *f = fopen(tbar.settings.out_file,"w");
 	for (auto it = sector_list.begin(); it != sector_list.end(); it++) {
-		//fprintf(f,"%s\n", build_sector_string(it->first, tbar.settings.sector_fmt, it->second).c_str());
-		
+		printf("%s\n", generic_format_string(tbar.settings.sector_fmt, sec_fmts, *it).c_str());
+		printf("next one\n");
 	}
 	fclose(f);
 }
 
-std::string build_general_string(std::string fmt, void* ptr);
-
 void set_sector_fmt(std::string secname, std::string fmt) {
-	if (secname == "WINDOWS") {
-		sector_list["WINDOWS"] = {build_tasks_string, fmt, &tbar.ordered_tasks};
-	} else if (secname == "DESKTOPS") {
-		sector_list["DESKTOPS"] = {build_workspace_string, fmt, &tbar.root_data.workspaces};
-	} else {
-		sector_list[secname] = {build_general_string, fmt, &tbar.root_data.workspaces};
-	}
+	sector_list[secname] = fmt;
 }
 
-std::string format_workspace_string(std::string fmt, workspace& wp) {
-	std::string out_str;
-	bool is_in_fmt = false;
-	for (auto it = fmt.begin(); it != fmt.end(); it++) {
-		if (is_in_fmt) {
-			if ((*it) == '%') {
-				out_str += '%';
-			} else if ((*it) == 't') {
-				out_str += wp.title;
-			} else if ((*it) == 'd') {
-				char buf[20];
-				sprintf(buf,"%ld", (signed long *)wp.pos);
-				out_str += buf;
-			} else {
-				char buf[256];
-				out_str = *it;
-				sprintf(buf,"Unknown format character: %%%s\n",out_str.c_str());
-				fail(buf);
-				break;
-			}
-			is_in_fmt = false;
-		} else {
-			if ((*it) == '%') {
-				is_in_fmt = true;
-			} else {
-				out_str += *it;
-			}
-		}
-	}
-end_fmt:
-	return out_str;
-}
-
-std::string build_workspace_string(std::string fmt, void* ptr) {
-	std::string out_str;
-	std::vector<workspace>* workspaces = (std::vector<workspace>*)ptr;
-	for (auto it = workspaces->begin(); it != workspaces->end(); it++) {
-		out_str += format_workspace_string(fmt,*it);
-	}
-	return out_str;
-}
-
-std::string build_general_string(std::string fmt, void* ptr) {
-	std::string out_str;
-	std::vector<workspace>* workspaces = (std::vector<workspace>*)ptr;
-	for (auto it = workspaces->begin(); it != workspaces->end(); it++) {
-		out_str += format_workspace_string(fmt,*it);
-	}
-	return out_str;
-}
-
-/*		main stuff		*/
+/*		initialization		*/
 
 int init_atoms() {
 	for (int i = 0; i < sizeof(n_atoms)/sizeof(Atom); i++) {
@@ -781,16 +703,39 @@ int init_atoms() {
 	return 0;
 }
 
-int handle_error(Display* dsp, XErrorEvent* e) {
-	return 0;
-}
-
 void init_x_connection() {
 	dsp = XOpenDisplay(NULL);
 	screen = DefaultScreen(dsp);
 	root_win = RootWindow(dsp, screen);
 	XSetErrorHandler(handle_error);
 }
+
+void init_rt_struct() {
+	tbar.settings.max_title_size = 255;
+	set_sector_fmt("WINDOWS","%w\n");
+	set_sector_fmt("DESKTOPS","%t\n");
+	set_sector_fmt("GENERAL","%c\n");
+	tbar.settings.deaf = false;
+	tbar.settings.interactive = false;
+	tbar.settings.force_pipes = false;
+	tbar.settings.stdout = false;
+	set_in_file("/tmp/termtask/in");
+	set_out_file("/tmp/termtask/out");
+	tbar.settings.sector_fmt = "\4%s: %c";
+	tbar.settings.verbose_level = 0;
+}
+
+void init() {
+	bool retval = eval_format_string("%w %d", win_fmts);
+	retval = eval_format_string("%w %F", win_fmts);
+	retval = eval_format_string("%w %X", win_fmts);
+	init_rt_struct();
+	add_event_request(root_win,SubstructureNotifyMask|PropertyChangeMask);
+	update_desktop_data();
+	build_client_list_from_scratch();
+}
+
+/*		settings		*/
 
 void set_in_file(char* path) {
 	strcpy(tbar.settings.in_file, path);
@@ -808,38 +753,7 @@ void set_out_file(const char* path) {
 	strcpy(tbar.settings.out_file, path);
 }
 
-void init_rt_struct() {
-	tbar.settings.max_title_size = 255;
-	set_sector_fmt("WINDOWS","%n\n");
-	set_sector_fmt("DESKTOPS","%t\n");
-	set_sector_fmt("GENERAL","%c\n");
-	tbar.settings.deaf = false;
-	tbar.settings.interactive = false;
-	tbar.settings.force_pipes = false;
-	tbar.settings.stdout = false;
-	set_in_file("/tmp/termtask/in");
-	set_out_file("/tmp/termtask/out");
-	tbar.settings.sector_fmt = "\4%s: %c";
-	tbar.settings.verbose_level = 0;
-}
-
-void init() {
-	bool retval = generic_format_string("%w %d", win_fmts);
-	retval = generic_format_string("%w %F", win_fmts);
-	retval = generic_format_string("%w %X", win_fmts);
-	init_rt_struct();
-	add_event_request(root_win,SubstructureNotifyMask|PropertyChangeMask);
-	update_desktop_data();
-	build_client_list_from_scratch();
-}
-
-void clean_up() {
-	XCloseDisplay(dsp);
-	if (tbar.settings.force_pipes) {
-		delete_pipe(tbar.settings.in_file);
-		delete_pipe(tbar.settings.out_file);
-	}
-}
+/*		main stuff		*/
 
 void parse_args(int argc, char* argv[]) {
 	static option long_options[] = {
@@ -866,7 +780,7 @@ void parse_args(int argc, char* argv[]) {
 		switch (c) {
 			case 1: {
 				if (cur_sec_name != "") {
-					if (eval_format_string(optarg,"Dnc","%") == false) fail("Invalid format string.");
+					//if (eval_format_string(optarg,"Dnc","%") == false) fail("Invalid format string.");
 					set_sector_fmt(cur_sec_name,optarg);
 					cur_sec_name = "";
 				}
@@ -901,18 +815,18 @@ void parse_args(int argc, char* argv[]) {
 				break;
 			}
 			case 'f': {
-				if (eval_format_string(optarg,"wxidopD","%$") == false) fail("Invalid format string.");
-				sector_list["WINDOWS"] = {build_tasks_string, optarg, &tbar.ordered_tasks};
+				if (eval_format_string(optarg,win_fmts) == false) fail("Invalid format string.");
+				set_sector_fmt("WINDOWS",optarg);
 				
 				break;
 			}
 			case 'w': {
-				if (eval_format_string(optarg,"tic","%") == false) fail("Invalid workspace format string.");
-				sector_list["DESKTOPS"] = {build_workspace_string, optarg, &tbar.root_data.workspaces};
+				if (eval_format_string(optarg,work_fmts) == false) fail("Invalid workspace format string.");
+				set_sector_fmt("DESKTOPS", optarg);
 				break;
 			}
 			case 'S': {
-				if (eval_format_string(optarg,"sc","%") == false) fail("Invalid sector format string.");
+				if (eval_format_string(optarg,sec_fmts) == false) fail("Invalid sector format string.");
 				tbar.settings.sector_fmt = optarg;
 				break;
 			}
@@ -944,7 +858,7 @@ int main(int argc, char* argv[]) {
 		if (!create_pipe(tbar.settings.out_file)) fprintf(stderr, "Could not create pipe at %s\n", tbar.settings.out_file);
 	}
 	print_taskbar_fmt();
-	print_sector_list();
+	//print_sector_list();
 	XEvent e;
 	
 	while (1) {
