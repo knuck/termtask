@@ -16,26 +16,29 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
-
-#include <unistd.h>
 #include <vector>
 #include <string>
 #include <map>
 #include <string.h>
-#include <getopt.h>
+
 #include <signal.h>
 #include <functional>
-#include <algorithm>
 
-
+#include "types.h"
+#include "helpers.h"
 #include "x11.h"
+#include "formatting.h"
+#include "io.h"
+#include "settings.h"
+#include "fail.h"
+
+taskbar tbar;
+std::map<std::string,std::string> sector_list;
 
 /*
 # termtask
@@ -82,182 +85,23 @@ $z = group by z-order
 
 */
 
-/*		help 		*/
-
-#define VERSION "0.1f"
-#define HELP "termtask " VERSION "\n" \
-"Usage: termtask [options]...\n" \
-"\n" \
-"General options\n" \
-"  -c, --config=<FILE>      Read configuration from FILE, ignoring other arguments.\n" \
-"  -d, --deaf               Ignore commands from input file.\n" \
-"  -g, --foreground         Run in foreground. Without this option, termtask will\n" \
-"                           daemonize on startup. If -i is set, this is ignored.\n" \
-"  -i, --interactive        Start ncurses interactive mode.\n" \
-"  -s, --stdout             Output to stdout instead of using a file. Cannot be\n" \
-"                           used with -i.\n" \
-"\n" \
-"I/O control\n" \
-"  -p, --handle-pipes       Treat input and output files as named pipes, handling\n" \
-"                           creation and deletion.\n" \
-"  -I, --input=<FILE>       Path to read commands from. The default is\n" \
-"                           /tmp/termtask/in. If used with -d, it has no effect.\n" \
-"  -O, --output=<FILE>      Path to write output to. The default is\n" \
-"                           /tmp/termtask/out. If used with -s, it has no effect.\n" \
-"\n" \
-"Formatting\n" \
-"  -f, --format=<FMT>       Format string for window output. This is equivalent to\n" \
-"                           --set WINDOW <FMT>. Defaults to \"%w\\n\"\n"\
-"  -w, --workspace=<FMT>    Format string for desktop output. This is equivalent to\n" \
-"                           --set DESKTOP <FMT>. Defaults to \"%t\\n\"\n\n"\
-"  -S, --sector=<FMT>       Format string for sector output. This is equivalent to\n" \
-"                           --set SECTOR <FMT>. Defaults to \"%s\\n%c\\4\"\n"\
-"  -t, --set <SECTOR> <FMT> Sets format string for SECTOR. If SECTOR is not one of\n" \
-"                           the default sectors, only global formatting will be\n" \
-"                           available. For more information on sectors, refer\n" \
-"                           to the manual.\n" \
-"\n" \
-" For more information on format strings, please refer to the manual.\n" \
-"\n" \
-"Debugging\n" \
-"  -v, --verbose [LEVEL]    Set debug information output level: \n" \
-"                             0: Output nothing.\n" \
-"                             1: Output debugging information to stderr [default].\n" \
-"                             2: Output debugging information and the processed.\n" \
-"                                output to stderr.\n" \
-"                           The LEVEL value is optional, and if left in blank,\n" \
-"                           it'll be set to 2.\n" \
-"\n" \
-"Misc\n" \
-"  -h, --help               Show this help. \n" \
-"\n" \
-"\n" \
-"Author, current maintainer: Benjamin MdA <knuckvice@gmail.com>\n"\
-"Website: https://github.com/knuck/termtask\n"\
-"Released under the GNU General Public License.\n"\
-"Copyright (C) 2012"
-
-
-/*		c++11 std::string literal		*/
-std::string operator "" s (const char* p, size_t) {
-	return std::string(p);
-}
-
-/*		defines		*/
-
-#define MAX_PROPERTY_VALUE_LEN 4096
-#define ALL_DESKTOPS -1
-#define WINDOW_NOT_REGGED -1
-
-struct task {
-	Window wid;
-	int pos;
-	std::string title;
-	unsigned int pid;
-	std::string command;
-	signed long desktop;
-};
-
-struct rt_settings {
-	int max_title_size;
-	// opts
-	bool deaf,interactive,force_pipes,stdout;
-	char in_file[256],out_file[256];
-	FILE *in_file_pointer, *out_file_pointer;
-	std::string sector_fmt;
-	int verbose_level;
-};
-
-struct workspace {
-	std::string title;
-	long pos;
-};
-
-struct root_win_data {
-	long num_desktops;
-	long current_desk;
-};
-
-struct taskbar {
-	root_win_data root_data;
-	rt_settings settings;
-	std::vector<task> ordered_tasks;
-	std::vector<workspace> workspaces;
-};
-
-/*		runtime stuff		*/
-
-taskbar tbar;
-std::map<std::string,std::string> sector_list;
-typedef std::pair<const std::string,std::string> sector_type;
-
 /*		function prototypes		*/
 
-void fail(const char*);
-/*void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask);
-unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num=NULL);
-unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned long* out_num=NULL);
-unsigned long* get_desktop_for(Window win_id);
-char* get_window_title(Window win_id);
-Window* get_client_list(unsigned long* out_num);*/
 void update_desktop_names();
 void update_desktop_num();
 void update_current_desktop();
 void update_desktop_data();
 void build_client_list_from_scratch();
 int find_tbar_window(Window wid, taskbar* taskbar=&tbar);
-void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsigned long nitems);
 int get_pid(Window wid);
 std::string get_cmd_line(int pid);
-int open_pipe();
-void close_pipe();
-
 void print_taskbar_fmt();
-
 int init_atoms();
 int handle_error(Display* dsp, XErrorEvent* e);
 void init_rt_struct();
 void init();
 void init_x_connection();
-void clean_up();
 
-void set_in_file(char* path);
-
-void set_out_file(char* path);
-
-void set_in_file(const char* path);
-
-void set_out_file(const char* path);
-bool delete_pipe(char* path);
-
-/*		basic fallback		*/
-
-void fail(const char* msg) {
-	fprintf(stderr,"%s\n", msg);
-	clean_up();
-	exit(1);
-}
-
-void sig_exit(int param) {
-	clean_up();
-	signal(SIGINT,SIG_DFL);
-	raise(SIGINT);
-	exit(0);
-}
-
-int handle_error(Display* dsp, XErrorEvent* e) {
-	return 0;
-}
-
-/*		clean up		*/
-
-void clean_up() {
-	XCloseDisplay(dsp);
-	if (tbar.settings.force_pipes) {
-		delete_pipe(tbar.settings.in_file);
-		delete_pipe(tbar.settings.out_file);
-	}
-}
 
 /*		virtual desktops		*/
 
@@ -335,16 +179,7 @@ int find_tbar_window(Window wid, taskbar* taskbar /* &tbar */) {
 	return WINDOW_NOT_REGGED;
 }
 
-void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsigned long nitems) {
-	out.clear();
-	std::string namebuf;
-    int i = 0;
-    while (i < nitems) {
-    	namebuf = list+i;
-    	out.push_back(namebuf);
-    	i += strlen(list+i)+1;
-    }
-}
+
 
 /*		pid and command-line		*/
 
@@ -375,221 +210,11 @@ std::string get_cmd_line(int pid) {
 	return retval;
 }
 
-/*		io/pipe handling		*/
-
-bool create_pipe(char* path) {
-	if (mkfifo(path,0666) != 0) {
-		if (errno != EEXIST) return false;
-	}
-	return true;
-}
-
-bool delete_pipe(char* path) {
-	if (unlink(path) != 0) {
-		return false;
-	}
-	return true;
-}
 
 void write_raw_sector(FILE* file, std::string secname, unsigned int length) {
 	fprintf(file, "%s", secname.c_str());
 	fwrite(&length,4,1,file);
 }
-
-/*		formatting		*/
-
-template <typename T> bool eval_format_string(std::string targ_str, std::map<std::string, std::function<std::string(T&)>> allowed_fmt) {
-	bool is_in_fmt = false;
-	std::string current_format = "";
-	for (auto it = targ_str.begin(); it != targ_str.end(); it++) {
-		if (is_in_fmt) {
-			if (current_format[0] == *it) {
-				current_format += "";
-			} else {
-				//printf("searching for %s\n", (current_format+(*it)).c_str());
-				if (allowed_fmt.find(current_format+(*it)) != allowed_fmt.end()) {
-					current_format = "";
-				} else {
-				//	printf("failed\n");
-					return false;
-				}
-			}
-			is_in_fmt = false;
-		} else {
-			if (allowed_fmt.end()!=find_if(allowed_fmt.begin(),allowed_fmt.end(),[it] (std::pair<const std::string, std::function<std::string(T&)>>& sit) -> bool {
-				return sit.first[0] == *it;
-			})) {
-				is_in_fmt = true;
-				current_format += *it;
-			}
-		}
-	}
-	return true;
-}
-
-std::string generic_format_string(std::string targ_str, std::map<std::string, std::function<std::string()>>& format_types) {
-	bool is_in_fmt = false;
-	std::string current_format = "";
-	std::string out_str;
-	for (auto it = targ_str.begin(); it != targ_str.end(); it++) {
-		if (is_in_fmt) {
-			if (current_format[0] == *it) {
-				current_format = "";
-				out_str+=*it;
-			} else {
-				out_str += format_types[current_format+(*it)]();
-				current_format = "";
-			}
-			is_in_fmt = false;
-		} else {
-			if (format_types.end()!=find_if(format_types.begin(),format_types.end(),[it] (std::pair<const std::string, std::function<std::string()>>& sit) -> bool {
-					return sit.first[0] == *it; })) {
-				is_in_fmt = true;
-				current_format += *it;
-			} else {
-				out_str += *it;
-			}
-		}
-	}
-	return out_str;
-}
-
-template <typename T> std::string generic_format_string(std::string targ_str, std::map<std::string, std::function<std::string(T&)>>& format_types, T& data) {
-	bool is_in_fmt = false;
-	std::string current_format = "";
-	std::string out_str;
-	for (auto it = targ_str.begin(); it != targ_str.end(); it++) {
-		if (is_in_fmt) {
-			if (current_format[0] == *it) {
-				current_format = "";
-				out_str+=*it;
-			} else {
-				out_str += format_types[current_format+(*it)](data);
-				current_format = "";
-			}
-			is_in_fmt = false;
-		} else {
-			if (format_types.end()!=find_if(format_types.begin(),format_types.end(),[it] (std::pair<const std::string, std::function<std::string(T&)>>& sit) -> bool {
-				return sit.first[0] == *it;
-			})) {
-				is_in_fmt = true;
-				current_format += *it;
-			} else {
-				out_str += *it;
-			}
-		}
-	}
-	return out_str;
-}
-
-template <typename T> std::string generic_build_string(std::string targ_str, std::map<std::string, std::function<std::string(T&)>>& format_types, std::vector<T>& data) {
-	std::string out_str;
-	for (auto it = data.begin(); it != data.end(); it++) {
-		out_str += generic_format_string(targ_str,format_types,*it);
-	}
-	return out_str;
-}
-
-/*		lambdas for formatting		*/
-
-/*		window formatting		*/
-
-std::map<std::string,std::function<std::string(task&)>> win_fmts = {
-	{"%w",[](task &t) -> std::string {
-						char buf[256];
-						sprintf(buf,"%.*s",tbar.settings.max_title_size,t.title.c_str());
-						return buf;
-					   }
-	},
-	{"%d",[](task &t) -> std::string {
-						char buf[20];
-						sprintf(buf,"%ld",(signed long *)t.desktop);
-						return buf;
-					   }
-	},
-	{"%p",[](task &t) -> std::string {
-						char buf[20];
-						sprintf(buf,"0x02%x",(signed long *)t.pid);
-						return buf;
-					   }
-	},
-	{"%P",[](task &t) -> std::string {
-						char buf[20];
-						sprintf(buf,"0x02%X",(signed long *)t.pid);
-						return buf;
-					   }
-	},
-	{"%c",[](task &t) -> std::string {
-						char buf[256];
-						sprintf(buf,"%s", t.command.c_str());
-						return buf;
-					   }
-	},
-	{"%x",[](task &t) -> std::string {
-						char buf[256];
-						sprintf(buf,"0x02%x", t.wid);
-						return buf;
-					   }
-	},
-	{"%X",[](task &t) -> std::string {
-						char buf[256];
-						sprintf(buf,"0x02%X", t.wid);
-						return buf;
-	}}
-};
-
-/*		workspace formatting		*/
-
-std::map<std::string,std::function<std::string(workspace&)>> work_fmts = {
-	{"%t",[](workspace &wp) -> std::string {
-						return wp.title;
-					   }
-	},
-	{"%d",[](workspace &wp) -> std::string {
-						char buf[20];
-						sprintf(buf,"%ld", (signed long *)wp.pos);
-						return buf;
-	}}
-};
-
-/*		general formatting		*/
-
-std::map<std::string,std::function<std::string()>> gen_fmts = {
-	{"%D",[]() -> std::string {
-						char buf[20];
-						sprintf(buf,"%ld",tbar.root_data.num_desktops);
-						return buf;
-					   }
-	},
-	{"%n",[]() -> std::string {
-						char buf[20];
-						sprintf(buf,"%d",tbar.ordered_tasks.size());
-						return buf;
-					   }
-	},
-	{"%c",[]() -> std::string {
-						char buf[20];
-						sprintf(buf,"%ld",tbar.root_data.current_desk);
-						return buf;
-	}}
-};
-
-/*		sector formatting		*/
-
-std::map<std::string,std::function<std::string(sector_type&)>> sec_fmts = {
-	{"%s",[](sector_type& sec) -> std::string {
-		return sec.first;
-	}},
-	{"%c",[](sector_type& sec) -> std::string {
-		if (sec.first == "WINDOWS") {
-			return generic_build_string(sec.second, win_fmts,tbar.ordered_tasks);
-		} else if (sec.first == "DESKTOPS") {
-			return generic_build_string(sec.second, work_fmts,tbar.workspaces);
-		} else {
-			return generic_format_string(sec.second, gen_fmts);
-		}
-	}}
-};
 
 void print_sector_list() {
 	std::string seclist;
@@ -609,19 +234,6 @@ void print_sector_list() {
 	fclose(f);
 }
 
-FILE* get_out_file() {
-	if (tbar.settings.out_file == "stdout"s) {
-		return stdout;
-	}
-	tbar.settings.out_file_pointer = fopen(tbar.settings.out_file,"w");
-	return tbar.settings.out_file_pointer;
-}
-
-void release_out_file() {
-	if (tbar.settings.out_file != "stdout"s) {
-		fclose(tbar.settings.out_file_pointer);
-	}
-}
 
 void print_taskbar_fmt() {
 	FILE* f = get_out_file();
@@ -632,9 +244,7 @@ void print_taskbar_fmt() {
 	release_out_file();
 }
 
-void set_sector_fmt(std::string secname, std::string fmt) {
-	sector_list[secname] = fmt;
-}
+
 
 /*		initialization		*/
 
@@ -691,120 +301,6 @@ void init() {
 	add_event_request(root_win,SubstructureNotifyMask|PropertyChangeMask);
 	update_desktop_data();
 	build_client_list_from_scratch();
-}
-
-/*		settings		*/
-
-void set_in_file(char* path) {
-	strcpy(tbar.settings.in_file, path);
-}
-
-void set_out_file(char* path) {
-	strcpy(tbar.settings.out_file, path);
-}
-
-void set_in_file(const char* path) {
-	strcpy(tbar.settings.in_file, path);
-}
-
-void set_out_file(const char* path) {
-	strcpy(tbar.settings.out_file, path);
-}
-
-/*		main stuff		*/
-
-void parse_args(int argc, char* argv[]) {
-	static option long_options[] = {
-		{"config",required_argument,NULL,'c'},
-		{"deaf",no_argument,NULL,'d'},
-		{"interactive",no_argument,NULL,'i'},
-		{"pipes",no_argument,NULL,'p'},
-		{"input",required_argument,NULL,'I'},
-		{"output",required_argument,NULL,'O'},
-		{"format",required_argument,NULL,'f'},
-		{"foreground",required_argument,NULL,'F'},
-		{"workspace",required_argument,NULL,'w'},
-		{"verbose",optional_argument,NULL,'v'},
-		{"stdout",no_argument,NULL,'s'},
-		{"sector",required_argument,NULL,'S'},
-		{"set",required_argument,NULL,'t'},
-		{"help",no_argument,NULL,'h'},
-		{0,0,0}
-	};
-	int c;
-	int option_index;
-	std::string cur_sec_name = "";
-	while ((c = getopt_long(argc, argv, "-dipshFS:I:O:t:f:w:c:v::",long_options,&option_index)) != -1) {
-		switch (c) {
-			case 1: {
-				if (cur_sec_name != "") {
-					//if (eval_format_string(optarg,"Dnc","%") == false) fail("Invalid format string.");
-					set_sector_fmt(cur_sec_name,optarg);
-					cur_sec_name = "";
-				}
-				break;
-			}
-			case 'd': {
-				tbar.settings.deaf = true;
-				break;
-			}
-			case 'i': {
-				tbar.settings.interactive = true;
-				break;
-			}
-			case 'p': {
-				tbar.settings.force_pipes = true;
-				break;
-			}
-			case 's': {
-				tbar.settings.stdout = true;
-				set_out_file("stdout");
-				break;
-			}
-			case 't': {
-				cur_sec_name = optarg;
-				break;
-			}
-			case 'I': {
-				set_in_file(optarg);
-				break;
-			}
-			case 'O': {
-				set_out_file(optarg);
-				break;
-			}
-			case 'f': {
-				if (eval_format_string(optarg,win_fmts) == false) fail("Invalid format string.");
-				set_sector_fmt("WINDOWS",optarg);
-				
-				break;
-			}
-			case 'w': {
-				if (eval_format_string(optarg,work_fmts) == false) fail("Invalid workspace format string.");
-				set_sector_fmt("DESKTOPS", optarg);
-				break;
-			}
-			case 'S': {
-				if (eval_format_string(optarg,sec_fmts) == false) fail("Invalid sector format string.");
-				tbar.settings.sector_fmt = optarg;
-				break;
-			}
-			case 'v': {
-				if (optarg) {
-					tbar.settings.verbose_level = atoi(optarg);
-				} else {
-					tbar.settings.verbose_level = 2;
-				}
-				break;
-			}
-			case 'h': {
-				printf("%s\n", HELP);
-				clean_up();
-				exit(0);
-				break;
-			}
-		}
-	}
 }
 
 int main(int argc, char* argv[]) {

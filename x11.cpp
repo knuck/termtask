@@ -9,15 +9,7 @@ int screen;
 /*		x11 atoms		*/
 
 Atom n_atoms[20];
-const unsigned int clist_atom = 0;
-const unsigned int utf8Atom = 1;
-const unsigned int nameAtom = 2;
-const unsigned int vis_atom = 3;
-const unsigned int desk_atom = 4;
-const unsigned int deskname_atom = 5;
-const unsigned int curdesk_atom = 6;
-const unsigned int pid_atom = 7;
-const unsigned int desknum_atom = 8;
+
 
 void add_event_request(Window wid, int mask /* StructureNotifyMask|PropertyChangeMask */) {
 	XSelectInput(dsp,wid,mask);
