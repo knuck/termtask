@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+
 #include <unistd.h>
 #include <vector>
 #include <string>
@@ -33,21 +34,14 @@
 #include <functional>
 #include <algorithm>
 
+
+#include "x11.h"
+
 /*
 # termtask
 
-#extra-sector-fmt
-%D = num_workspaces
-%n = num_windows
-%c = cur_desk
-
 #outputfmt
 "ẅ x f"
-%w = window name
-%x = hex id
-%i = dec id
-%d = desktop id
-%p = pid
 %z = z-order
 
 $ = group by, eg:
@@ -81,7 +75,7 @@ Even more so with desktop formatting such as "%t"
 </WINDOWS>
 </DESKTOP>
 
-$w = group by window
+$m = group by window
 $d = group by desktop
 $p = group by pid
 $z = group by z-order
@@ -144,6 +138,11 @@ $z = group by z-order
 "Copyright (C) 2012"
 
 
+/*		c++11 std::string literal		*/
+std::string operator "" s (const char* p, size_t) {
+	return std::string(p);
+}
+
 /*		defines		*/
 
 #define MAX_PROPERTY_VALUE_LEN 4096
@@ -159,12 +158,12 @@ struct task {
 	signed long desktop;
 };
 
-
 struct rt_settings {
 	int max_title_size;
 	// opts
 	bool deaf,interactive,force_pipes,stdout;
 	char in_file[256],out_file[256];
+	FILE *in_file_pointer, *out_file_pointer;
 	std::string sector_fmt;
 	int verbose_level;
 };
@@ -186,25 +185,6 @@ struct taskbar {
 	std::vector<workspace> workspaces;
 };
 
-/*		x11 stuff		*/
-
-Display* dsp;
-Window root_win;
-int screen;
-
-/*		x11 atoms		*/
-
-Atom n_atoms[20];
-const unsigned int clist_atom = 0;
-const unsigned int utf8Atom = 1;
-const unsigned int nameAtom = 2;
-const unsigned int vis_atom = 3;
-const unsigned int desk_atom = 4;
-const unsigned int deskname_atom = 5;
-const unsigned int curdesk_atom = 6;
-const unsigned int pid_atom = 7;
-const unsigned int desknum_atom = 8;
-
 /*		runtime stuff		*/
 
 taskbar tbar;
@@ -214,12 +194,12 @@ typedef std::pair<const std::string,std::string> sector_type;
 /*		function prototypes		*/
 
 void fail(const char*);
-void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask);
+/*void add_event_request(Window wid, int mask=StructureNotifyMask|PropertyChangeMask);
 unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num=NULL);
 unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned long* out_num=NULL);
 unsigned long* get_desktop_for(Window win_id);
 char* get_window_title(Window win_id);
-Window* get_client_list(unsigned long* out_num);
+Window* get_client_list(unsigned long* out_num);*/
 void update_desktop_names();
 void update_desktop_num();
 void update_current_desktop();
@@ -253,7 +233,7 @@ bool delete_pipe(char* path);
 /*		basic fallback		*/
 
 void fail(const char* msg) {
-	printf("%s\n", msg);
+	fprintf(stderr,"%s\n", msg);
 	clean_up();
 	exit(1);
 }
@@ -277,57 +257,6 @@ void clean_up() {
 		delete_pipe(tbar.settings.in_file);
 		delete_pipe(tbar.settings.out_file);
 	}
-}
-
-/*		x11 wrappers		*/
-
-void add_event_request(Window wid, int mask /* StructureNotifyMask|PropertyChangeMask */) {
-	XSelectInput(dsp,wid,mask);
-}
-
-unsigned char* get_xprop(Window win_id, char* prop_name, Atom prop_type, unsigned long* out_num /* NULL */) {
-	int format;
-	unsigned long nitems,after;
-	unsigned char* data = NULL;
-	Atom ret_type;
-	Atom targ_atom = XInternAtom(dsp,prop_name,true);
-	if (Success == XGetWindowProperty(dsp, win_id, targ_atom, 0, 65536,
-			false, prop_type, &ret_type, &format,
-			&nitems, &after, &data)) {
-		if (out_num) *out_num = nitems;
-		return data;
-	}
-	return NULL;
-}
-
-
-unsigned char* get_xprop(Window win_id, Atom prop_atom, Atom prop_type, unsigned long* out_num /* NULL */) {
-	int format;
-	unsigned long nitems,after;
-	unsigned char* data = NULL;
-	Atom ret_type;
-	if (Success == XGetWindowProperty(dsp, win_id, prop_atom, 0, 65536,
-			false, prop_type, &ret_type, &format,
-			&nitems, &after, &data)) {
-		if (out_num) *out_num = nitems;
-		return data;
-	}
-	return NULL;
-}
-
-/*		get_xprop wrappers		*/
-
-unsigned long* get_desktop_for(Window win_id) {
-	unsigned long* retval = (unsigned long *)get_xprop(win_id,n_atoms[desk_atom],XA_CARDINAL);
-	return (unsigned long *)get_xprop(win_id,n_atoms[desk_atom],XA_CARDINAL);
-}
-
-char* get_window_title(Window win_id) {
-	return (char*)get_xprop(win_id,n_atoms[nameAtom],n_atoms[utf8Atom]);
-}
-
-Window* get_client_list(unsigned long* out_num) {
-	return (Window*)get_xprop(root_win,n_atoms[clist_atom],XA_WINDOW,out_num);
 }
 
 /*		virtual desktops		*/
@@ -429,12 +358,10 @@ int get_pid(Window wid) {
 	return pid;
 }
 
-#define PROC std::string("/proc/")
-#define CMDLINE std::string("/cmdline")
 std::string get_cmd_line(int pid) {
 	char buf[10];
 	sprintf(buf,"%d",pid);
-	std::string targ_file = PROC+buf+CMDLINE;
+	std::string targ_file = "/proc/"s+buf+"/cmdline"s;
 	std::string retval;
 	FILE *f = fopen(targ_file.c_str(),"rb");
 	if (f) {
@@ -516,8 +443,7 @@ std::string generic_format_string(std::string targ_str, std::map<std::string, st
 			is_in_fmt = false;
 		} else {
 			if (format_types.end()!=find_if(format_types.begin(),format_types.end(),[it] (std::pair<const std::string, std::function<std::string()>>& sit) -> bool {
-				return sit.first[0] == *it;
-			})) {
+					return sit.first[0] == *it; })) {
 				is_in_fmt = true;
 				current_format += *it;
 			} else {
@@ -578,6 +504,24 @@ std::map<std::string,std::function<std::string(task&)>> win_fmts = {
 	{"%d",[](task &t) -> std::string {
 						char buf[20];
 						sprintf(buf,"%ld",(signed long *)t.desktop);
+						return buf;
+					   }
+	},
+	{"%p",[](task &t) -> std::string {
+						char buf[20];
+						sprintf(buf,"0x02%x",(signed long *)t.pid);
+						return buf;
+					   }
+	},
+	{"%P",[](task &t) -> std::string {
+						char buf[20];
+						sprintf(buf,"0x02%X",(signed long *)t.pid);
+						return buf;
+					   }
+	},
+	{"%c",[](task &t) -> std::string {
+						char buf[256];
+						sprintf(buf,"%s", t.command.c_str());
 						return buf;
 					   }
 	},
@@ -665,13 +609,27 @@ void print_sector_list() {
 	fclose(f);
 }
 
-void print_taskbar_fmt() {
-	FILE *f = fopen(tbar.settings.out_file,"w");
-	for (auto it = sector_list.begin(); it != sector_list.end(); it++) {
-		printf("%s\n", generic_format_string(tbar.settings.sector_fmt, sec_fmts, *it).c_str());
-		printf("next one\n");
+FILE* get_out_file() {
+	if (tbar.settings.out_file == "stdout"s) {
+		return stdout;
 	}
-	fclose(f);
+	tbar.settings.out_file_pointer = fopen(tbar.settings.out_file,"w");
+	return tbar.settings.out_file_pointer;
+}
+
+void release_out_file() {
+	if (tbar.settings.out_file != "stdout"s) {
+		fclose(tbar.settings.out_file_pointer);
+	}
+}
+
+void print_taskbar_fmt() {
+	FILE* f = get_out_file();
+	for (auto it = sector_list.begin(); it != sector_list.end(); it++) {
+		fprintf(f,"%s\n", generic_format_string(tbar.settings.sector_fmt, sec_fmts, *it).c_str());
+		fprintf(f,"next one\n");
+	}
+	release_out_file();
 }
 
 void set_sector_fmt(std::string secname, std::string fmt) {
@@ -800,6 +758,7 @@ void parse_args(int argc, char* argv[]) {
 			}
 			case 's': {
 				tbar.settings.stdout = true;
+				set_out_file("stdout");
 				break;
 			}
 			case 't': {
@@ -840,6 +799,8 @@ void parse_args(int argc, char* argv[]) {
 			}
 			case 'h': {
 				printf("%s\n", HELP);
+				clean_up();
+				exit(0);
 				break;
 			}
 		}
