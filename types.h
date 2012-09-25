@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <map>
+#include "workspace.h"
+#include "task.h"
 
 /*		defines		*/
 
@@ -11,14 +13,7 @@
 #define ALL_DESKTOPS -1
 #define WINDOW_NOT_REGGED -1
 
-struct task {
-	Window wid;
-	int pos;
-	std::string title;
-	unsigned int pid;
-	std::string command;
-	signed long desktop;
-};
+
 
 struct rt_settings {
 	int max_title_size;
@@ -28,11 +23,6 @@ struct rt_settings {
 	FILE *in_file_pointer, *out_file_pointer;
 	std::string sector_fmt;
 	int verbose_level;
-};
-
-struct workspace {
-	std::string title;
-	long pos;
 };
 
 struct root_win_data {

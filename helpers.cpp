@@ -17,3 +17,14 @@ void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsign
     	i += strlen(list+i)+1;
     }
 }
+
+int find_tbar_window(Window wid, taskbar* taskbar /* &tbar */) {
+	int i = 0;
+	for (auto it = taskbar->ordered_tasks.begin(); it != taskbar->ordered_tasks.end(); it++) {
+		if ((*it).wid == wid) {
+			return i;
+		}
+		i+=1;
+	}
+	return WINDOW_NOT_REGGED;
+}
