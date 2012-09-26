@@ -1,5 +1,12 @@
-
+AddOption(
+    '--dbg',
+    action='store_true',
+    help='debug build',
+    default=False)
 env = Environment(CCFLAGS='-std=c++0x')
+
+if GetOption('dbg'):
+    env.Append(CCFLAGS = ' -g')
 
 Export('env')
 
