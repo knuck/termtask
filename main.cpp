@@ -18,10 +18,7 @@
 
 #include <stdio.h>
 #include <X11/Xlib.h>
-#include <string>
-#include <map>
 #include <signal.h>
-
 #include "types.h"
 #include "helpers.h"
 #include "x11.h"
@@ -32,81 +29,19 @@
 #include "workspace.h"
 #include "task.h"
 #include "init.h"
+#include "ncurses.h"
 
-
-std::map<std::string,std::string> sector_list;
-
-/*
-# termtask
-
-#outputfmt
-"ẅ x f"
-%z = z-order
-
-$ = group by, eg:
-
-"%w %x" would output
-WINDOWS:
-<window-name> <window-id>
-
-"$w%w %x" would output
-WINDOWS:
-TITLE:<window-name> WID:<window-id>
-
-With a proper sector formatting and group by, you can achieve basic sgml output:
-Sector formatting: "<%s>%c</%s>"
-Output formatting: "$w%w %p"
-<WINDOWS>
-<WINDOW>
-<TITLE>Some window</TITLE>
-<PID>23789</PID>
-</WINDOW>
-</WINDOWS>
-
-Even more so with desktop formatting such as "%t"
-<DESKTOP>
-<TITLE>Desktop title</TITLE>
-<WINDOWS>
-<WINDOW>
-<TITLE>Some window</TITLE>
-<PID>23789</PID>
-</WINDOW>
-</WINDOWS>
-</DESKTOP>
-
-$m = group by window
-$d = group by desktop
-$p = group by pid
-$z = group by z-order
-
-*/
-
-void write_raw_sector(FILE* file, std::string secname, unsigned int length) {
-	fprintf(file, "%s", secname.c_str());
-	fwrite(&length,4,1,file);
-}
-
-void print_sector_list() {
-	std::string seclist;
-	char buf[256];
-	int total_size = 0;
-	for (auto it = sector_list.begin(); it != sector_list.end(); it++) {
-		total_size+=sprintf(buf,"%s\n", it->first.c_str());
-		seclist += buf;
-	}
-
-	FILE *f = fopen(tbar.settings.out_file,"w");
-		write_raw_sector(f,"SECTORLIST",total_size);
-		printf("SECTORLIST");
-		printf("%d\n", total_size);
-		fwrite(seclist.c_str(),1,seclist.size(),f);
-		printf("%s\n", seclist.c_str());
-	fclose(f);
+void output_sector_descriptor() {
+	static int num_outs = 0;
+	FILE *f = get_sector_file();
+		fprintf(f, "%04d %s", num_outs,tbar.settings.sector_fmt.c_str());
+		num_outs++;
+	release_sector_file();
 }
 
 void print_taskbar_fmt() {
 	FILE* f = get_out_file();
-	for (auto it = sector_list.begin(); it != sector_list.end(); it++) {
+	for (auto it = tbar.settings.sector_list.begin(); it != tbar.settings.sector_list.end(); it++) {
 		fprintf(f,"%s\n", generic_format_string(tbar.settings.sector_fmt, sec_fmts, *it).c_str());
 		fprintf(f,"next one\n");
 	}
@@ -114,7 +49,8 @@ void print_taskbar_fmt() {
 }
 
 int main(int argc, char* argv[]) {
-	
+	ncurses_init();
+	exit(0);
 	init_x_connection();
 	init_atoms();
 	init();
@@ -124,8 +60,8 @@ int main(int argc, char* argv[]) {
 		if (!create_pipe(tbar.settings.in_file)) fprintf(stderr, "Could not create pipe at %s\n", tbar.settings.in_file);
 		if (!create_pipe(tbar.settings.out_file)) fprintf(stderr, "Could not create pipe at %s\n", tbar.settings.out_file);
 	}
+	output_sector_descriptor();
 	print_taskbar_fmt();
-	//print_sector_list();
 	XEvent e;
 	
 	while (1) {

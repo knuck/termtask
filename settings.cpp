@@ -9,7 +9,7 @@
 extern taskbar tbar;
 extern std::map<std::string,std::string> sector_list;
 void set_sector_fmt(std::string secname, std::string fmt) {
-	sector_list[secname] = fmt;
+	tbar.settings.sector_list[secname] = fmt;
 }
 
 void set_in_file(char* path) {
@@ -28,6 +28,14 @@ void set_out_file(const char* path) {
 	strcpy(tbar.settings.out_file, path);
 }
 
+void set_sector_file(char* path) {
+	strcpy(tbar.settings.sector_file, path);
+}
+
+void set_sector_file(const char* path) {
+	strcpy(tbar.settings.sector_file, path);
+}
+
 void parse_args(int argc, char* argv[]) {
 	static option long_options[] = {
 		{"config",required_argument,NULL,'c'},
@@ -39,17 +47,18 @@ void parse_args(int argc, char* argv[]) {
 		{"format",required_argument,NULL,'f'},
 		{"foreground",required_argument,NULL,'F'},
 		{"workspace",required_argument,NULL,'w'},
-		{"verbose",optional_argument,NULL,'v'},
+		{"verbose",optional_argument,NULL,'V'},
 		{"stdout",no_argument,NULL,'s'},
 		{"sector",required_argument,NULL,'S'},
 		{"set",required_argument,NULL,'t'},
 		{"help",no_argument,NULL,'h'},
+		{"version",no_argument,NULL,'v'},
 		{0,0,0}
 	};
 	int c;
 	int option_index;
 	std::string cur_sec_name = "";
-	while ((c = getopt_long(argc, argv, "-dipshFS:I:O:t:f:w:c:v::",long_options,&option_index)) != -1) {
+	while ((c = getopt_long(argc, argv, "-dipshvFS:I:O:t:f:w:c:V::",long_options,&option_index)) != -1) {
 		switch (c) {
 			case 1: {
 				if (cur_sec_name != "") {
@@ -104,7 +113,7 @@ void parse_args(int argc, char* argv[]) {
 				tbar.settings.sector_fmt = optarg;
 				break;
 			}
-			case 'v': {
+			case 'V': {
 				if (optarg) {
 					tbar.settings.verbose_level = atoi(optarg);
 				} else {
@@ -114,6 +123,12 @@ void parse_args(int argc, char* argv[]) {
 			}
 			case 'h': {
 				printf("%s\n", HELP);
+				clean_up();
+				exit(0);
+				break;
+			}
+			case 'v': {
+				printf("%s\n", VERSION_INFO);
 				clean_up();
 				exit(0);
 				break;

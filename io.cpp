@@ -33,3 +33,12 @@ void release_out_file() {
 		fclose(tbar.settings.out_file_pointer);
 	}
 }
+
+FILE* get_sector_file() {
+	tbar.settings.sec_file_pointer = fopen(tbar.settings.sector_file,"w");
+	return tbar.settings.sec_file_pointer;
+}
+
+void release_sector_file() {
+	fclose(tbar.settings.sec_file_pointer);
+}

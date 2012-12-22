@@ -2,17 +2,35 @@
 	#define _SETTINGS_H
 
 #include <string>
+#include <map>
+#include <stdio.h>
+#include <stdlib.h>
 
 void set_sector_fmt(std::string secname, std::string fmt);
 void set_in_file(char* path);
 void set_out_file(char* path);
 void set_in_file(const char* path);
 void set_out_file(const char* path);
+void set_sector_file(char* path);
+void set_sector_file(const char* path);
 void parse_args(int argc, char* argv[]);
+
+
+struct rt_settings {
+	int max_title_size;
+	// opts
+	bool deaf,interactive,force_pipes,stdout,no_transient;
+	char in_file[256],out_file[256], sector_file[256];
+	FILE *in_file_pointer, *out_file_pointer, *sec_file_pointer;
+	std::string sector_fmt;
+	std::map<std::string,std::string> sector_list;
+	std::string group_sort_fmt;
+	int verbose_level;
+};
 
 /*		help 		*/
 
-#define VERSION "0.1f"
+#define VERSION "0.2"
 #define HELP "termtask " VERSION "\n" \
 "Usage: termtask [options]...\n" \
 "\n" \
@@ -22,6 +40,7 @@ void parse_args(int argc, char* argv[]);
 "  -g, --foreground         Run in foreground. Without this option, termtask will\n" \
 "                           daemonize on startup. If -i is set, this is ignored.\n" \
 "  -i, --interactive        Start ncurses interactive mode.\n" \
+"  -n, --no-transient       Ignores transient windows.\n" \
 "  -s, --stdout             Output to stdout instead of using a file. Cannot be\n" \
 "                           used with -i.\n" \
 "\n" \
@@ -48,7 +67,7 @@ void parse_args(int argc, char* argv[]);
 " For more information on format strings, please refer to the manual.\n" \
 "\n" \
 "Debugging\n" \
-"  -v, --verbose [LEVEL]    Set debug information output level: \n" \
+"  -V, --verbose [LEVEL]    Set debug information output level: \n" \
 "                             0: Output nothing.\n" \
 "                             1: Output debugging information to stderr [default].\n" \
 "                             2: Output debugging information and the processed.\n" \
@@ -58,11 +77,16 @@ void parse_args(int argc, char* argv[]);
 "\n" \
 "Misc\n" \
 "  -h, --help               Show this help. \n" \
+"  -v, --version            Show version information. \n" \
 "\n" \
 "\n" \
 "Author, current maintainer: Benjamin MdA <knuckvice@gmail.com>\n"\
 "Website: https://github.com/knuck/termtask\n"\
 "Released under the GNU General Public License.\n"\
 "Copyright (C) 2012"
+
+#define VERSION_INFO \
+"termtask v" VERSION "\n"\
+"Compiled with GCC " __VERSION__
 
 #endif

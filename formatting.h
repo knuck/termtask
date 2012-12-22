@@ -5,11 +5,13 @@
 #include <functional>
 #include <algorithm>
 #include "types.h"
+#include "helpers.h"
 
 extern std::map<std::string,std::function<std::string(task&)>> win_fmts;
 extern std::map<std::string,std::function<std::string(workspace&)>> work_fmts;
 extern std::map<std::string,std::function<std::string()>> gen_fmts;
 extern std::map<std::string,std::function<std::string(sector_type&)>> sec_fmts;
+extern std::map<std::string, std::function<std::vector<task>(std::vector<task>&)>> grp_fmts;
 
 template <typename T> bool eval_format_string(std::string targ_str, std::map<std::string, std::function<std::string(T&)>> allowed_fmt) {
 	bool is_in_fmt = false;
@@ -78,7 +80,5 @@ template <typename T> std::string generic_build_string(std::string targ_str, std
 	}
 	return out_str;
 }
-
-
 
 #endif

@@ -1,3 +1,4 @@
+#include <sys/stat.h>
 #include "init.h"
 #include "x11.h"
 #include "types.h"
@@ -46,6 +47,7 @@ void init_rt_struct() {
 	tbar.settings.stdout = false;
 	set_in_file("/tmp/termtask/in");
 	set_out_file("/tmp/termtask/out");
+	set_sector_file("/tmp/termtask/.secdesc");
 	tbar.settings.sector_fmt = "\4%s: %c";
 	tbar.settings.verbose_level = 0;
 }
@@ -54,6 +56,11 @@ void init() {
 	bool retval = eval_format_string("%w %d", win_fmts);
 	retval = eval_format_string("%w %F", win_fmts);
 	retval = eval_format_string("%w %X", win_fmts);
+	{
+		struct stat st;
+		if (stat(tbar.settings.sector_file,&st) != 0)
+			mkdir("/tmp/termtask/",S_IRWXU | S_IRWXG | S_IRWXO);
+	}
 	init_rt_struct();
 	add_event_request(root_win,SubstructureNotifyMask|PropertyChangeMask);
 	update_desktop_data();

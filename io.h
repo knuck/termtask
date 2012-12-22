@@ -10,5 +10,7 @@ bool create_pipe(char* path);
 bool delete_pipe(char* path);
 FILE* get_out_file();
 void release_out_file();
+FILE* get_sector_file();
+void release_sector_file();
 
 #endif
