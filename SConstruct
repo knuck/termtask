@@ -19,5 +19,8 @@ t = env.Program('termtask',['main.cpp',
 							'fail.cpp',
 							'workspace.cpp',
 							'init.cpp',
-							'task.cpp'],LIBS=['X11','stdc++','menu','ncurses'])
+							'task.cpp',
+							'ncurses.cpp',
+							'ncurses_widget.cpp',
+							'ncurses_listbox.cpp'],LIBS=['X11','stdc++','menu','ncurses'])
 Default(t)

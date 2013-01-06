@@ -48,6 +48,84 @@ void print_taskbar_fmt() {
 	release_out_file();
 }
 
+void ncurses_end() {
+
+	endwin();
+}
+MENU* my_menu;
+void ncurses_loop() {
+	bool running = true;
+	while (running) {
+		char ch = getch();
+		if (ch == 'q') {
+			running = false;
+		} else if (ch == 'a') {
+			// int cur = item_index(current_item(my_menu));
+			// free_menu(my_menu);
+			// my_menu = init_menu(choices1);
+			// post_menu(my_menu);
+			// set_current_item(my_menu,*((menu_items(my_menu))+cur));
+			// refresh();
+		} else if (ch == 'b') {
+			menu_driver(my_menu, REQ_DOWN_ITEM);
+		}
+		
+		mvprintw(1,2,"X11 Clients: ");
+		attron(COLOR_PAIR(1));
+		printw("4");
+		attroff(COLOR_PAIR(1));
+		mvprintw(2,2,"Unlisted: ");
+		attron(COLOR_PAIR(1));
+		printw("0");
+		attroff(COLOR_PAIR(1));
+		move(5,0);
+		attron(COLOR_PAIR(2));
+		//attron(A_BOLD);
+		printw("  PID USER   WID  DESKTOP         Title                        Command               ");
+		//attroff(A_BOLD);
+		attroff(COLOR_PAIR(2));
+		//ncurses_draw(simple_box);
+		refresh();
+		usleep(1000);
+	}
+}
+
+void ncurses_init() {
+
+	stdscreen = initscr();
+	nodelay(stdscreen, true);
+	noecho();
+	//auto child_win = subwin(stdscreen,4,4,2,3);
+	//box(child_win,0,0);
+	//curs_set()
+	get_terminal_settings(terminal_settings);
+	if (terminal_settings.colors) start_color();
+	ncurses_widget simple_box;
+	simple_box.width = []() -> int { return 4; };
+	simple_box.height = []() -> int { return 4; };
+	ncurses_widget_move(simple_box,2,3);
+	use_default_colors();
+	
+	init_pair(1, COLOR_RED, -1);
+	init_pair(2, COLOR_BLACK, COLOR_GREEN);
+	//my_menu = init_menu(choices);
+	//post_menu(my_menu);
+	refresh();
+	ncurses_loop();
+	ncurses_end();
+	//MENU* 
+	//
+	//
+	//menu_driver(my_menu, REQ_DOWN_ITEM);
+	
+
+	
+	//printf("%d %d\n", get<0>(term_size), get<1>(term_size));
+}
+
+
+
+
 int main(int argc, char* argv[]) {
 	ncurses_init();
 	exit(0);
