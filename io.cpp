@@ -21,7 +21,7 @@ bool delete_pipe(char* path) {
 /*		io management		*/
 
 FILE* get_out_file() {
-	if (tbar.settings.out_file == "stdout"s) {
+	if (tbar.settings.stdout) {
 		return stdout;
 	}
 	tbar.settings.out_file_pointer = fopen(tbar.settings.out_file,"w");
@@ -29,7 +29,7 @@ FILE* get_out_file() {
 }
 
 void release_out_file() {
-	if (tbar.settings.out_file != "stdout"s) {
+	if (!tbar.settings.stdout) {
 		fclose(tbar.settings.out_file_pointer);
 	}
 }

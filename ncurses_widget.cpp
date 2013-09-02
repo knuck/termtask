@@ -8,8 +8,8 @@ const int NCURSES_BORDER_NORMAL = 0;
 
 
 void ncurses_widget_move(ncurses_widget& wd, int x, int y) {
-	wd.row = x;
-	wd.col = y;
+	wd.col = x;
+	wd.row = y;
 }
 
 void ncurses_widget_show(ncurses_widget& wd) {

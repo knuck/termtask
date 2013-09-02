@@ -7,6 +7,7 @@
 #include <string>
 #include <functional>
 #include "ncurses_widget.h"
+#include "ncurses_table.h"
 /*	TODO	*/
 /*	ListBox (TextInput)
 	TextInput (Label)
@@ -16,7 +17,12 @@
 	Splitter
 */
 
-#define is_border_area() cur_x == wd.col || cur_y == wd.row || cur_x == targ_width+wd.col-1 || cur_y == targ_height+wd.row-1
+#define is_border_area() (										\
+							   cur_x == wd.col					\
+					     	|| cur_y == wd.row					\
+						 	|| cur_x == targ_width+wd.col-1		\
+						 	|| cur_y == targ_height+wd.row-1	\
+						 )
 
 struct nc_splitter {
 	int focus;

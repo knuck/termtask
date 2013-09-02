@@ -20,7 +20,7 @@ void char_array_list_to_vector(char* list, std::vector<std::string>& out, unsign
 
 int find_tbar_window(Window wid, taskbar* taskbar /* &tbar */) {
 	int i = 0;
-	for (auto it = taskbar->ordered_tasks.begin(); it != taskbar->ordered_tasks.end(); it++) {
+	for (auto it = begin(taskbar->ordered_tasks); it != end(taskbar->ordered_tasks); it++) {
 		if ((*it).wid == wid) {
 			return i;
 		}

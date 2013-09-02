@@ -17,6 +17,7 @@
 struct root_win_data {
 	long num_desktops;
 	long current_desk;
+	long current_window;
 };
 
 struct taskbar {

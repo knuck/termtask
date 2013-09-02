@@ -31,11 +31,16 @@ template <typename T> bool eval_format_string(std::string targ_str, std::map<std
 			}
 			is_in_fmt = false;
 		} else {
-			if (allowed_fmt.end()!=find_if(allowed_fmt.begin(),allowed_fmt.end(),[it] (std::pair<const std::string, std::function<std::string(T&)>>& sit) -> bool {
-				return sit.first[0] == *it;
-			})) {
-				is_in_fmt = true;
-				current_format += *it;
+			if (	find_if(begin(allowed_fmt),
+							end(allowed_fmt),
+							[it] (std::pair<const std::string, std::function<std::string(T&)>>& sit)
+								-> bool {
+									return sit.first[0] == *it;
+								}
+							) != end(allowed_fmt)
+				) {
+					is_in_fmt = true;
+					current_format += *it;
 			}
 		}
 	}

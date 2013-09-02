@@ -24,10 +24,11 @@ void build_client_list_from_scratch() {
 					t.title = wtitle;
 					t.pid = get_pid(t.wid);
 					t.command = get_cmd_line(t.pid);
+					t.exe = get_program_path(t.pid);
 					t.desktop = targ_desk;
 				tbar.ordered_tasks.push_back(t);
-				XFree(desk_id);
 				add_event_request(win_ptr[i]);
+				XFree(desk_id);
 				XFree(wtitle);
 			}
 		}
@@ -48,10 +49,10 @@ int get_pid(Window wid) {
 	return pid;
 }
 
-std::string get_cmd_line(int pid) {
+std::string read_from_proc(std::string path, int pid) {
 	char buf[10];
 	sprintf(buf,"%d",pid);
-	std::string targ_file = "/proc/"s+buf+"/cmdline"s;
+	std::string targ_file = "/proc/"s+buf+path;
 	std::string retval;
 	FILE *f = fopen(targ_file.c_str(),"rb");
 	if (f) {
@@ -63,4 +64,12 @@ std::string get_cmd_line(int pid) {
 		fclose(f);
 	}
 	return retval;
+}
+
+std::string get_cmd_line(int pid) {
+	return read_from_proc("/cmdline"s, pid);
+}
+
+std::string get_program_path(int pid) {
+	return read_from_proc("/exe"s, pid);
 }

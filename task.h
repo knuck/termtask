@@ -10,11 +10,13 @@ struct task {
 	std::string title;
 	unsigned int pid;
 	std::string command;
+	std::string exe;
 	signed long desktop;
 };
 
 void build_client_list_from_scratch();
 int get_pid(Window wid);
 std::string get_cmd_line(int pid);
+std::string get_program_path(int pid);
 
 #endif

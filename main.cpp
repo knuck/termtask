@@ -41,7 +41,7 @@ void output_sector_descriptor() {
 
 void print_taskbar_fmt() {
 	FILE* f = get_out_file();
-	for (auto it = tbar.settings.sector_list.begin(); it != tbar.settings.sector_list.end(); it++) {
+	for (auto it = begin(tbar.settings.sector_list); it != end(tbar.settings.sector_list); it++) {
 		fprintf(f,"%s\n", generic_format_string(tbar.settings.sector_fmt, sec_fmts, *it).c_str());
 		fprintf(f,"next one\n");
 	}
@@ -53,23 +53,52 @@ void ncurses_end() {
 	endwin();
 }
 MENU* my_menu;
+extern char *choices[];
+extern char *choices1[];
+ncurses_table main_table;
+ncurses_widget simple_box;
+ncurses_widget simple_box2;
 void ncurses_loop() {
-	bool running = true;
+	auto running = true;
 	while (running) {
-		char ch = getch();
+		auto ch = getch();
 		if (ch == 'q') {
 			running = false;
 		} else if (ch == 'a') {
-			// int cur = item_index(current_item(my_menu));
-			// free_menu(my_menu);
-			// my_menu = init_menu(choices1);
-			// post_menu(my_menu);
-			// set_current_item(my_menu,*((menu_items(my_menu))+cur));
-			// refresh();
-		} else if (ch == 'b') {
-			menu_driver(my_menu, REQ_DOWN_ITEM);
+			int cur = item_index(current_item(my_menu));
+			free_menu(my_menu);
+			my_menu = init_menu(choices1);
+			post_menu(my_menu);
+			set_current_item(my_menu,*((menu_items(my_menu))+cur));
+			refresh();
+		} else if (ch == KEY_UP) {
+			clear();
+			//menu_driver(my_menu, REQ_UP_ITEM);
+			ncurses_widget_move(simple_box,simple_box.col,simple_box.row-1);
+			
+			ncurses_widget_move(simple_box2,simple_box2.col,simple_box2.row+1);
+			
+			
+		} else if (ch == KEY_DOWN) {
+			//menu_driver(my_menu, REQ_DOWN_ITEM);
+			clear();
+			ncurses_widget_move(simple_box,simple_box.col,simple_box.row+1);
+			ncurses_widget_move(simple_box2,simple_box2.col,simple_box2.row-1);
+			
+			
+		} else if (ch == KEY_LEFT) {
+			clear();
+			ncurses_widget_move(simple_box,simple_box.col-1,simple_box.row);
+			
+			
+		} else if (ch == KEY_RIGHT) {
+			clear();
+			ncurses_widget_move(simple_box,simple_box.col+1,simple_box.row);
+			
+			
 		}
 		
+		/*
 		mvprintw(1,2,"X11 Clients: ");
 		attron(COLOR_PAIR(1));
 		printw("4");
@@ -83,16 +112,24 @@ void ncurses_loop() {
 		//attron(A_BOLD);
 		printw("  PID USER   WID  DESKTOP         Title                        Command               ");
 		//attroff(A_BOLD);
-		attroff(COLOR_PAIR(2));
-		//ncurses_draw(simple_box);
-		refresh();
+		attroff(COLOR_PAIR(2));*/
+		ncurses_draw_table(main_table);
+		//ncurses_draw(simple_box2);
+		doupdate();
 		usleep(1000);
 	}
 }
 
+collumn_collection test = {
+	{"First",0},
+	{"Second",0},
+	{"Third",0}
+};
+
 void ncurses_init() {
 
 	stdscreen = initscr();
+	keypad(stdscreen, TRUE);
 	nodelay(stdscreen, true);
 	noecho();
 	//auto child_win = subwin(stdscreen,4,4,2,3);
@@ -100,10 +137,22 @@ void ncurses_init() {
 	//curs_set()
 	get_terminal_settings(terminal_settings);
 	if (terminal_settings.colors) start_color();
-	ncurses_widget simple_box;
-	simple_box.width = []() -> int { return 4; };
-	simple_box.height = []() -> int { return 4; };
-	ncurses_widget_move(simple_box,2,3);
+	
+	ncurses_table_set_collumns(main_table, test);
+	ncurses_widget_move(main_table,2,3);
+
+
+	//simple_box.width = []() -> int { return 4; };
+	//simple_box.height = []() -> int { return 4; };
+
+	//simple_box2.width = []() -> int { return 8; };
+	//simple_box2.height = []() -> int { return 6; };
+
+	//second_box.width = []() -> int { return 4; };
+	//second_box.height = []() -> int { return 4; };
+
+	//ncurses_widget_move(simple_box,2,3);
+	//ncurses_widget_move(simple_box2,2,3);
 	use_default_colors();
 	
 	init_pair(1, COLOR_RED, -1);
@@ -111,6 +160,7 @@ void ncurses_init() {
 	//my_menu = init_menu(choices);
 	//post_menu(my_menu);
 	refresh();
+	
 	ncurses_loop();
 	ncurses_end();
 	//MENU* 
@@ -147,7 +197,7 @@ int main(int argc, char* argv[]) {
 			XNextEvent(dsp, &e);
 			switch (e.type) {
 				case PropertyNotify: {
-					XSync(dsp,false);
+					XSync(dsp, false);
 					XPropertyEvent* de = (XPropertyEvent*)&e;
 					if (find_tbar_window(de->window) != WINDOW_NOT_REGGED) {
 						build_client_list_from_scratch();
@@ -158,7 +208,7 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 				case DestroyNotify: {
-					XSync(dsp,false);
+					XSync(dsp, false);
 					XDestroyWindowEvent* de = (XDestroyWindowEvent*)&e;
 					if (find_tbar_window(de->window) != WINDOW_NOT_REGGED) {
 						build_client_list_from_scratch();
@@ -167,7 +217,7 @@ int main(int argc, char* argv[]) {
 					break;
 				}
 				case CreateNotify: {
-					XSync(dsp,false);
+					XSync(dsp, false);
 					XCreateWindowEvent* ce = (XCreateWindowEvent*)&e;
 					Window wid;
 					build_client_list_from_scratch();

@@ -17,6 +17,8 @@ struct ncurses_widget {
 	//std::vector<ncurses_widget> childs;
 	std::function<void(char)> on_key_input;
 	std::function<void(int,int)> on_mouse_input;
+
+	
 };
 
 void ncurses_widget_move(ncurses_widget& wd, int x, int y);

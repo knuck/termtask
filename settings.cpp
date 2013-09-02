@@ -82,7 +82,7 @@ void parse_args(int argc, char* argv[]) {
 			}
 			case 's': {
 				tbar.settings.stdout = true;
-				set_out_file("stdout");
+				//set_out_file(stdout);
 				break;
 			}
 			case 't': {
